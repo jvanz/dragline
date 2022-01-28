@@ -1,0 +1,5 @@
+spider/data/
+data
+__pycache__
+gazettes.csv
+scrapy.log
