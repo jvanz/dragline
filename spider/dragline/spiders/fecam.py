@@ -18,6 +18,8 @@ class FecamGazetteSpider(scrapy.Spider):
         super(FecamGazetteSpider, self).__init__(*args, **kwargs)
 
         self.category = category
+        self.start_date = None
+        self.end_date = None
 
         if start_date is not None:
             try:
@@ -175,7 +177,7 @@ class FecamGazetteSpider(scrapy.Spider):
 
         return Gazette(
             date=dateparser.parse(document["date"], languages=("pt",)).date(),
-            file_urls=(document["link"],),
+            file_link=(document["link"],),
             power="unknown",
             category=document.get("category", "unknown"),
             entity=document.get("entity", "unknown"),

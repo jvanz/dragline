@@ -10,7 +10,7 @@ class Gazette(scrapy.Item):
     date = scrapy.Field()
     power = scrapy.Field()
     scraped_at = scrapy.Field()
-    file_urls = scrapy.Field()
+    file_link = scrapy.Field()
     files = scrapy.Field()
     category = scrapy.Field()
     entity = scrapy.Field()
