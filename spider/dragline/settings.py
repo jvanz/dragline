@@ -13,21 +13,17 @@ BOT_NAME = 'dragline'
 SPIDER_MODULES = ['dragline.spiders']
 NEWSPIDER_MODULE = 'dragline.spiders'
 
-ITEM_PIPELINES = {
-    "dragline.pipelines.DraglineFilesPipeline": 100,
-}
-
 DOWNLOAD_TIMEOUT = 360
-# FILES_STORE = os.environ.get("FILES_STORE", "date")
-FILES_STORE = os.environ.get("FILES_STORE", "s3://default/")
+# FILES_STORE = os.environ.get("FILES_STORE", "s3://diariosfecam/")
+FILES_STORE = os.environ.get("FILES_STORE", "data")
 MEDIA_ALLOW_REDIRECTS = True
 
 # These settings are needed only when storing downloaded files
 # in a S3 bucket
-AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "minio-access-key")
-AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "minio-secret-key")
-AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "http://127.0.0.1:9000")
-AWS_REGION_NAME = os.environ.get("AWS_REGION_NAME", "us-east-1")
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL", "")
+AWS_REGION_NAME = os.environ.get("AWS_REGION_NAME", "")
 
 FILES_STORE_S3_ACL = os.environ.get("FILES_STORE_S3_ACL", "public-read")
 
@@ -41,15 +37,15 @@ LOG_FILE = "scrapy.log"
 ROBOTSTXT_OBEY = True
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
-#CONCURRENT_REQUESTS = 32
+#CONCURRENT_REQUESTS = 12
 
 # Configure a delay for requests for the same website (default: 0)
 # See https://docs.scrapy.org/en/latest/topics/settings.html#download-delay
 # See also autothrottle settings and docs
 #DOWNLOAD_DELAY = 3
 # The download delay setting will honor only one of:
-#CONCURRENT_REQUESTS_PER_DOMAIN = 16
-#CONCURRENT_REQUESTS_PER_IP = 16
+CONCURRENT_REQUESTS_PER_DOMAIN = 4
+CONCURRENT_REQUESTS_PER_IP = 4
 
 # Disable cookies (enabled by default)
 #COOKIES_ENABLED = False
@@ -96,7 +92,7 @@ AUTOTHROTTLE_START_DELAY = 5
 AUTOTHROTTLE_MAX_DELAY = 60
 # The average number of requests Scrapy should be sending in parallel to
 # each remote server
-AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
+AUTOTHROTTLE_TARGET_CONCURRENCY = 2
 # Enable showing throttling stats for every response received:
 AUTOTHROTTLE_DEBUG = False
 
