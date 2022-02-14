@@ -3,3 +3,5 @@ data
 __pycache__
 gazettes.csv
 scrapy.log
+notebooks/*.png
+notebooks/*.gif

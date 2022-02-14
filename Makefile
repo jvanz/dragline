@@ -79,3 +79,7 @@ stop-apache-tika:
 start-apache-tika: stop-apache-tika
 	podman run -d  --name $(APACHE_TIKA_CONTAINER_NAME) -p 9998:9998 \
 		apache/tika:2.2.1
+
+.PHONY: update-conda-env
+update-conda-env:
+	conda env export > environment.yml

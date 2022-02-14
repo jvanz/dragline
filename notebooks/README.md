@@ -1,0 +1,1 @@
+This directory contains notebooks used to understand some concenpts and explore the data. Some of them come from Internet other are written from scratch. 
