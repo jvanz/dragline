@@ -82,4 +82,21 @@ start-apache-tika: stop-apache-tika
 
 .PHONY: update-conda-env
 update-conda-env:
-	conda env export > environment.yml
+	conda env export -n pytorch > pytorch_env.yml
+	conda env export -n tensorflow2.7 > tensorflow2.7_env.yml
+	conda env export -n tf-gpu > tf_gpu_env.yml
+	conda env export -n tf2.7 > tf2.7_env.yml
+	conda env export -n tfgpu > tfgpu_env.yml
+
+.PHONY: train-autoencoder
+train-autoencoder:
+	TF_CPP_MIN_LOG_LEVEL=2 python scripts/text_autoencoder.py
+
+.PHONY: partial-train-autoencoder
+partial-train-autoencoder:
+	DATA_FILE=data/wikipedia_20220220_pt_partial.csv DATASET_SIZE=312 python scripts/text_autoencoder.py
+
+
+.PHONY: download_wikipedia_dataset
+download_wikipedia_dataset:
+	python scripts/download_wikipedia_data.py
