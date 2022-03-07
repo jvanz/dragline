@@ -98,3 +98,7 @@ partial-train-autoencoder:
 .PHONY: train-transformer-autoencoder
 train-transformer-autoencoder:
 	python scripts/text_autoencoder_transformer.py
+
+.PHONY: download_wikipedia_dataset
+download_wikipedia_dataset:
+	python scripts/download_wikipedia_data.py
