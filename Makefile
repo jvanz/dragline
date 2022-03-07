@@ -11,6 +11,8 @@ APACHE_TIKA_IMAGE_NAME ?= apache-tika
 APACHE_TIKA_IMAGE_TAG ?= latest
 APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
+ENV_NAME ?= $(shell conda env export --json | jq ".name")
+
 .PHONY: download-models
 download-models:
 	python -m spacy download pt_core_news_lg
@@ -82,4 +84,17 @@ start-apache-tika: stop-apache-tika
 
 .PHONY: update-conda-env
 update-conda-env:
-	conda env export > environment.yml
+	echo "Exporting $(ENV_NAME)"
+	conda env export -n $(ENV_NAME) > $(ENV_NAME)_env.yml
+
+.PHONY: train-autoencoder
+train-autoencoder:
+	TF_CPP_MIN_LOG_LEVEL=2 python scripts/text_autoencoder.py
+
+.PHONY: partial-train-autoencoder
+partial-train-autoencoder:
+	DATA_FILE=data/wikipedia_20220220_pt_partial.csv DATASET_SIZE=320000 python scripts/text_autoencoder.py
+
+.PHONY: train-transformer-autoencoder
+train-transformer-autoencoder:
+	python scripts/text_autoencoder_transformer.py
