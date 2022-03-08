@@ -188,6 +188,11 @@ def main():
     dataset = dataset.map(
         preprocess_text, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=True
     )
+
+    def filter_invalid_shapes(text, target):
+        return tf.shape(text)[0] == MAX_TEXT_LENGTH
+
+    dataset = dataset.filter(filter_invalid_shapes)
     logging.info(list(dataset.take(1)))
 
     model = create_or_load_model()
