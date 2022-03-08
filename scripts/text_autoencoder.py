@@ -13,7 +13,9 @@ VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
-NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", 4))
+NUM_PARALLEL_CALLS = tf.data.AUTOTUNE
+if "NUM_PARALLEL_CALLS" in os.environ:
+    NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS"))
 DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
 DEFAULT_MODEL_NAME = "text_autoencoder"
 MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
@@ -112,13 +114,28 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     )
     model.fit(
         train_dataset.batch(
-            BATCH_SIZE, drop_remainder=True, num_parallel_calls=6, deterministic=False
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
         ),
-        validation_data=validation_dataset,
+        validation_data=validation_dataset.batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
+        ),
         epochs=EPOCHS,
         callbacks=[model_checkpoint_callback],
     )
-    results = model.evaluate(test_dataset)
+    results = model.evaluate(
+        test_dataset.batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
+        )
+    )
     print()
     print(f"Model evaluation: {results}")
     print()
