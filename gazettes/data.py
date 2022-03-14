@@ -6,6 +6,27 @@ from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
+import tensorflow as tf
+
+
+def decode_fn(encoded_example):
+    return tf.io.parse_single_example(
+        encoded_example,
+        {"text": tf.io.FixedLenFeature([], dtype=tf.string, default_value="")},
+    )["text"]
+
+
+class WikipediaDataset(tf.data.Dataset):
+    def __new__(cls, data_dir: str, parallel_file_read=4):
+        datafiles = os.listdir(data_dir)
+        datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
+        dataset = tf.data.TFRecordDataset(
+            datafiles, num_parallel_reads=parallel_file_read
+        )
+        dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+        dataset = dataset.map(decode_fn)
+        return dataset
+
 
 def load_gazettes_csv():
     with open("data/gazettes_unix.csv", "r") as csvfile:
