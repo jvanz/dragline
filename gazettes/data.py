@@ -19,6 +19,9 @@ def decode_fn(encoded_example):
 class WikipediaDataset(tf.data.Dataset):
     def __new__(cls, data_dir: str, parallel_file_read=4):
         datafiles = os.listdir(data_dir)
+        if "WIKIPEDIA_DATA_FILES_COUNT" in os.environ:
+            file_count = int(os.environ["WIKIPEDIA_DATA_FILES_COUNT"])
+            datafiles = os.listdir(data_dir)[:file_count]
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
         dataset = tf.data.TFRecordDataset(
             datafiles, num_parallel_reads=parallel_file_read

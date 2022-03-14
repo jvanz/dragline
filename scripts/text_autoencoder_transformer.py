@@ -77,9 +77,6 @@ def create_model():
         tf.keras.layers.GRU(units=DIMENSOES_ESPACO_LATENTE, return_sequences=True,),
         name="decoder2",
     )(decoder)
-    # decoder = tf.keras.layers.Dense(5 * VOCAB_SIZE, activation="relu", name="decoder3")(
-    #     decoder
-    # )
     decoder = tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder4")(
         decoder
     )
