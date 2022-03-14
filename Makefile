@@ -11,16 +11,17 @@ APACHE_TIKA_IMAGE_NAME ?= apache-tika
 APACHE_TIKA_IMAGE_TAG ?= latest
 APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
+DATA_DIR ?= "data"
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
-DATA_FILE ?= "data/wikipedia_20220220_pt.csv"
-WIKIPEDIA_DATA_DIR ?= "data/wikipedia"
+DATA_FILE ?= "$(DATA_DIR)/wikipedia_20220220_pt.csv"
+WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
 WIKIPEDIA_DATA_FILES_COUNT ?= $(shell ls -l $(WIKIPEDIA_DATA_DIR) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= $$(( $(WIKIPEDIA_DATA_FILES_COUNT) * 1000 ))
-VOCAB_FILE ?= "data/bertimbau_base_vocab.txt"
+VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
 DATASET_SIZE ?= $(shell expr `cat $(DATA_FILE) | wc -l` - 1)
 VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 MODEL_PATH ?= "models/text_transformer_autoencoder"
-SENTENCES_FILE ?= "data/sentences_to_predict"
+SENTENCES_FILE ?= "$(DATA_FILE)/sentences_to_predict"
 BATCH_SIZE ?= 32
 
 python_script = PYTHONPATH=$(PWD) \
@@ -29,6 +30,7 @@ python_script = PYTHONPATH=$(PWD) \
 	DATASET_SIZE=$(DATASET_SIZE) \
 	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
 	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
+	WIKIPEDIA_DATA_FILES_COUNT=$(WIKIPEDIA_DATA_FILES_COUNT) \
 	VOCAB_SIZE=$(VOCAB_SIZE) \
 	MODEL_PATH=$(MODEL_PATH) \
 	SENTENCES_FILE=$(SENTENCES_FILE) \
@@ -126,10 +128,10 @@ download_wikipedia_dataset:
 
 .PHONY: download_bertimbau_tensorflow_checkpoint
 download_bertimbau_tensorflow_checkpoint:
-	curl -o data/bert-base-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-base-portuguese-cased/bert-base-portuguese-cased_tensorflow_checkpoint.zip
-	curl -o data/bert-base-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-base-portuguese-cased/vocab.txt
-	curl -o data/bert-large-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/bert-large-portuguese-cased_tensorflow_checkpoint.zip
-	curl -o data/bert-large-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/vocab.txt
+	curl -o $(DATA_DIR)/bertimbau-base-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-base-portuguese-cased/bert-base-portuguese-cased_tensorflow_checkpoint.zip
+	curl -o $(DATA_DIR)/bertimbau-base-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-base-portuguese-cased/vocab.txt
+	curl -o $(DATA_DIR)/bertimbau-large-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/bert-large-portuguese-cased_tensorflow_checkpoint.zip
+	curl -o $(DATA_DIR)/bertimbau-large-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/vocab.txt
 
 .PHONY: show_data_info
 show_data_info:
