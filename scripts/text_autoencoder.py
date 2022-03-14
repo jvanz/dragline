@@ -48,20 +48,14 @@ def create_model():
                 name="encoder2",
             ),
             tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="decoder0"),
+            tf.keras.layers.Dropout(0.2, name="decoder1"),
             tf.keras.layers.Bidirectional(
                 tf.keras.layers.GRU(
                     units=DIMENSOES_ESPACO_LATENTE, return_sequences=True,
                 ),
-                name="decoder1",
-            ),
-            tf.keras.layers.TimeDistributed(
-                tf.keras.layers.Dense(5 * VOCAB_SIZE, activation="relu"),
                 name="decoder2",
             ),
-            tf.keras.layers.TimeDistributed(
-                tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax"),
-                name="decoder3",
-            ),
+            tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder3"),
         ],
         name=MODEL_NAME,
     )
