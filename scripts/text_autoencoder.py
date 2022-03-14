@@ -5,9 +5,11 @@ import csv
 import tensorflow as tf
 from tensorflow import keras
 
+from gazettes.data import WikipediaDataset
 
-DATA_FILE = str(os.environ.get("DATA_FILE", "data/wikipedia_20220220_pt.csv"))
-DATASET_SIZE = int(os.environ.get("DATASET_SIZE", 16450980))
+
+WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
+WIKIPEDIA_DATASET_SIZE = int(os.environ.get("WIKIPEDIA_DATASET_SIZE", 16450980))
 MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
 VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
@@ -19,13 +21,6 @@ if "NUM_PARALLEL_CALLS" in os.environ:
 DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
 DEFAULT_MODEL_NAME = "text_autoencoder"
 MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
-
-
-def load_data_from_file():
-    with open(DATA_FILE, newline="") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            yield row["text"], row["text"]
 
 
 def get_checkpoint_dir(model):
@@ -110,7 +105,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_weights_only=True,
         monitor="val_accuracy",
         mode="max",
-        save_best_only=False,
+        save_best_only=True,
     )
     model.fit(
         train_dataset.batch(
@@ -146,8 +141,8 @@ def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.INFO)
 
-    logging.info(f"DATA_FILE = {DATA_FILE}")
-    logging.info(f"DATASET_SIZE = {DATASET_SIZE}")
+    logging.info(f"WIKIPEDIA_DATA_DIR = {WIKIPEDIA_DATA_DIR}")
+    logging.info(f"WIKIPEDIA_DATASET_SIZE = {WIKIPEDIA_DATASET_SIZE}")
     logging.info(f"MAX_TEXT_LENGTH = {MAX_TEXT_LENGTH}")
     logging.info(f"VOCAB_SIZE = {VOCAB_SIZE}")
     logging.info(f"BATCH_SIZE = {BATCH_SIZE}")
@@ -160,14 +155,7 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    dataset = tf.data.Dataset.from_generator(
-        load_data_from_file,
-        output_signature=(
-            tf.TensorSpec(shape=(), dtype=tf.string),
-            tf.TensorSpec(shape=(), dtype=tf.string),
-        ),
-    )
-    dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
+    dataset = WikipediaDataset(WIKIPEDIA_DATA_DIR)
 
     vectorize_layer = tf.keras.layers.TextVectorization(
         max_tokens=VOCAB_SIZE,
@@ -177,16 +165,16 @@ def main():
     )
 
     logging.info(f"Adapting TextVectorization layers")
-    vectorize_layer.adapt(dataset.map(lambda text, target: text))
+    vectorize_layer.adapt(dataset)
 
-    def preprocess_text(text, target):
+    def preprocess_text(text):
         vectorized_text = vectorize_layer(text)
-        vectorized_target = vectorize_layer(target)
+        vectorized_target = vectorize_layer(text)
         return (vectorized_text, vectorized_target)
 
     logging.info(f"Preprocessing dataset")
     dataset = dataset.map(
-        preprocess_text, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=True
+        preprocess_text, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False
     )
 
     def filter_invalid_shapes(text, target):
@@ -197,7 +185,7 @@ def main():
 
     model = create_or_load_model()
     train_dataset, validation_dataset, test_dataset = get_dataset_pertitions(
-        dataset, DATASET_SIZE
+        dataset, WIKIPEDIA_DATASET_SIZE
     )
     train_model(model, train_dataset, validation_dataset, test_dataset)
 

@@ -24,6 +24,7 @@ SENTENCES_FILE ?= "data/sentences_to_predict"
 BATCH_SIZE ?= 32
 
 python_script = PYTHONPATH=$(PWD) \
+	TF_CPP_MIN_LOG_LEVEL=2 \
 	DATA_FILE=$(DATA_FILE) \
 	DATASET_SIZE=$(DATASET_SIZE) \
 	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
@@ -35,8 +36,7 @@ python_script = PYTHONPATH=$(PWD) \
 	python $(1)
 
 .PHONY: download-models
-download-models:
-	python -m spacy download pt_core_news_lg
+download-models: python -m spacy download pt_core_news_lg
 	python -m spacy download en_core_web_trf
 	python -m spacy download en_core_web_lg
 
@@ -109,8 +109,8 @@ update-conda-env:
 	conda env export -n $(ENV_NAME) > $(ENV_NAME)_env.yml
 
 .PHONY: train-autoencoder
-train-autoencoder:
-	TF_CPP_MIN_LOG_LEVEL=2 python scripts/text_autoencoder.py
+train-autoencoder: format
+	$(call python_script, scripts/text_autoencoder.py)
 
 .PHONY: partial-train-autoencoder
 partial-train-autoencoder:
@@ -137,9 +137,9 @@ show_data_info:
 	@echo Data file size: $(DATASET_SIZE)
 	@echo Vocabulary file: $(VOCAB_FILE)
 	@echo Vocabulary file size: $(VOCAB_SIZE)
-	@echo Wikipedia data dir: $(WIKIPEDIA_DATA_DIR) 
-	@echo Wikipedia data files: $(WIKIPEDIA_DATA_FILES_COUNT) 
-	@echo Wikipedia dataset size: $(WIKIPEDIA_DATASET_SIZE) 
+	@echo Wikipedia data dir: $(WIKIPEDIA_DATA_DIR)
+	@echo Wikipedia data files: $(WIKIPEDIA_DATA_FILES_COUNT)
+	@echo Wikipedia dataset size: $(WIKIPEDIA_DATASET_SIZE)
 
 .PHONY: predict
 predict:
