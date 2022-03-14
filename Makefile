@@ -12,6 +12,27 @@ APACHE_TIKA_IMAGE_TAG ?= latest
 APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
+DATA_FILE ?= "data/wikipedia_20220220_pt.csv"
+WIKIPEDIA_DATA_DIR ?= "data/wikipedia"
+WIKIPEDIA_DATA_FILES_COUNT ?= $(shell ls -l $(WIKIPEDIA_DATA_DIR) | wc -l)
+WIKIPEDIA_DATASET_SIZE ?= $$(( $(WIKIPEDIA_DATA_FILES_COUNT) * 1000 ))
+VOCAB_FILE ?= "data/bertimbau_base_vocab.txt"
+DATASET_SIZE ?= $(shell expr `cat $(DATA_FILE) | wc -l` - 1)
+VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
+MODEL_PATH ?= "models/text_transformer_autoencoder"
+SENTENCES_FILE ?= "data/sentences_to_predict"
+BATCH_SIZE ?= 32
+
+python_script = PYTHONPATH=$(PWD) \
+	DATA_FILE=$(DATA_FILE) \
+	DATASET_SIZE=$(DATASET_SIZE) \
+	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
+	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
+	VOCAB_SIZE=$(VOCAB_SIZE) \
+	MODEL_PATH=$(MODEL_PATH) \
+	SENTENCES_FILE=$(SENTENCES_FILE) \
+	BATCH_SIZE=$(BATCH_SIZE) \
+	python $(1)
 
 .PHONY: download-models
 download-models:
@@ -93,12 +114,33 @@ train-autoencoder:
 
 .PHONY: partial-train-autoencoder
 partial-train-autoencoder:
-	DATA_FILE=data/wikipedia_20220220_pt_partial.csv DATASET_SIZE=320000 python scripts/text_autoencoder.py
+	DATA_FILE=data/wikipedia_20220220_pt_partial.csv DATASET_SIZE=1000 python scripts/text_autoencoder.py
 
 .PHONY: train-transformer-autoencoder
-train-transformer-autoencoder:
-	python scripts/text_autoencoder_transformer.py
+train-transformer-autoencoder: format
+	$(call python_script, scripts/text_autoencoder_transformer.py)
 
 .PHONY: download_wikipedia_dataset
 download_wikipedia_dataset:
 	python scripts/download_wikipedia_data.py
+
+.PHONY: download_bertimbau_tensorflow_checkpoint
+download_bertimbau_tensorflow_checkpoint:
+	curl -o data/bert-base-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-base-portuguese-cased/bert-base-portuguese-cased_tensorflow_checkpoint.zip
+	curl -o data/bert-base-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-base-portuguese-cased/vocab.txt
+	curl -o data/bert-large-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/bert-large-portuguese-cased_tensorflow_checkpoint.zip
+	curl -o data/bert-large-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/vocab.txt
+
+.PHONY: show_data_info
+show_data_info:
+	@echo Data file: $(DATA_FILE)
+	@echo Data file size: $(DATASET_SIZE)
+	@echo Vocabulary file: $(VOCAB_FILE)
+	@echo Vocabulary file size: $(VOCAB_SIZE)
+	@echo Wikipedia data dir: $(WIKIPEDIA_DATA_DIR) 
+	@echo Wikipedia data files: $(WIKIPEDIA_DATA_FILES_COUNT) 
+	@echo Wikipedia dataset size: $(WIKIPEDIA_DATASET_SIZE) 
+
+.PHONY: predict
+predict:
+	$(call python_script, scripts/predict_text.py)
