@@ -6,6 +6,7 @@ from transformers import (
     AutoTokenizer,
 )
 import tensorflow as tf
+import numpy as np
 
 from gazettes.data import WikipediaDataset
 
@@ -87,7 +88,6 @@ def create_model():
         name=MODEL_NAME,
     )
     model.compile(
-        # loss=tf.keras.losses.SparseCategoricalCrossentropy(),
         loss=tf.keras.losses.CategoricalCrossentropy(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         metrics=["acc"],
@@ -176,7 +176,6 @@ def load_data():
 
     dataset = dataset.map(organize_targets)
     print_some_records(dataset)
-    assert_one_hot(dataset)
 
     return get_dataset_partitions(dataset, WIKIPEDIA_DATASET_SIZE)
 
@@ -225,6 +224,12 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     print()
     model.save(f"models/{MODEL_NAME}", overwrite=True)
 
+def get_logits(predictions):
+    sentences = []
+    for sentence in predictions:
+        sentence = np.argmax(sentence, axis=1)
+        sentences.append(sentence)
+    return np.asarray(sentences)
 
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -248,6 +253,22 @@ def main():
     train_dataset, validation_dataset, test_dataset = load_data()
     model = create_model()
     train_model(model, train_dataset, validation_dataset, test_dataset)
+
+    predictions = model.predict(
+        test_dataset.batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
+        )
+    )
+    logging.info(predictions[0])
+    logging.info(predictions.shape)
+    predictions = get_logits(predictions)
+    logging.info(predictions[0])
+    string_lookup = tf.keras.layers.StringLookup(vocabulary=VOCAB_FILE, invert=True)
+    predicted_sentences = string_lookup(predictions)
+    logging.info(predicted_sentences)
 
 
 if __name__ == "__main__":
