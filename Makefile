@@ -146,3 +146,9 @@ show_data_info:
 .PHONY: predict
 predict:
 	$(call python_script, scripts/predict_text.py)
+
+.PHONY: build-vocab
+build-vocab: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
+build-vocab:
+	$(call python_script, scripts/build_vocabulary.py)
+
