@@ -4,6 +4,7 @@ import csv
 
 import tensorflow as tf
 from tensorflow import keras
+import numpy as np
 
 from gazettes.data import WikipediaDataset
 
@@ -12,6 +13,7 @@ WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
 WIKIPEDIA_DATASET_SIZE = int(os.environ.get("WIKIPEDIA_DATASET_SIZE", 16450980))
 MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
 VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
+VOCAB_FILE = str(os.environ["VOCAB_FILE"])
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
@@ -24,7 +26,7 @@ MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
 
 
 def get_checkpoint_dir(model):
-    checkpoint_dir = os.path.join(os.getcwd(), "checkpoints", model.name)
+    checkpoint_dir = f"{os.getcwd()}/checkpoints/{MODEL_NAME}"
     os.makedirs(checkpoint_dir, exist_ok=True)
     return checkpoint_dir
 
@@ -60,7 +62,7 @@ def create_model():
         name=MODEL_NAME,
     )
     model.compile(
-        loss=tf.keras.losses.SparseCategoricalCrossentropy(),
+        loss=tf.keras.losses.CategoricalCrossentropy(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         metrics=["acc"],
     )
@@ -99,7 +101,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_weights_only=True,
         monitor="val_accuracy",
         mode="max",
-        save_best_only=True,
+        save_best_only=False,
     )
     model.fit(
         train_dataset.batch(
@@ -131,6 +133,14 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     model.save("models/text_autoencoder", overwrite=True)
 
 
+def get_logits(predictions):
+    sentences = []
+    for sentence in predictions:
+        sentence = np.argmax(sentence, axis=1)
+        sentences.append(sentence)
+    return np.asarray(sentences)
+
+
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.INFO)
@@ -139,6 +149,7 @@ def main():
     logging.info(f"WIKIPEDIA_DATASET_SIZE = {WIKIPEDIA_DATASET_SIZE}")
     logging.info(f"MAX_TEXT_LENGTH = {MAX_TEXT_LENGTH}")
     logging.info(f"VOCAB_SIZE = {VOCAB_SIZE}")
+    logging.info(f"VOCAB_FILE = {VOCAB_FILE}")
     logging.info(f"BATCH_SIZE = {BATCH_SIZE}")
     logging.info(f"EPOCHS = {EPOCHS}")
     logging.info(f"LEARNING_RATE = {LEARNING_RATE}")
@@ -152,21 +163,17 @@ def main():
     dataset = WikipediaDataset(WIKIPEDIA_DATA_DIR)
 
     vectorize_layer = tf.keras.layers.TextVectorization(
-        max_tokens=VOCAB_SIZE,
         output_mode="int",
         output_sequence_length=MAX_TEXT_LENGTH,
         name="vectorization_layer",
+        vocabulary=VOCAB_FILE,
     )
-
-    logging.info(f"Adapting TextVectorization layers")
-    vectorize_layer.adapt(dataset)
 
     def preprocess_text(text):
         vectorized_text = vectorize_layer(text)
-        vectorized_target = vectorize_layer(text)
+        vectorized_target = tf.one_hot(vectorize_layer(text), VOCAB_SIZE)
         return (vectorized_text, vectorized_target)
 
-    logging.info(f"Preprocessing dataset")
     dataset = dataset.map(
         preprocess_text, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False
     )
@@ -182,6 +189,25 @@ def main():
         dataset, WIKIPEDIA_DATASET_SIZE
     )
     train_model(model, train_dataset, validation_dataset, test_dataset)
+    test_dataset = test_dataset.map(lambda inputt, target: inputt)
+    logging.info("Test dataset:")
+    logging.info(list(test_dataset.take(1)))
+
+    predictions = model.predict(
+        test_dataset.batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
+        )
+    )
+    logging.info(predictions[0])
+    logging.info(predictions.shape)
+    predictions = get_logits(predictions)
+    logging.info(predictions[0])
+    string_lookup = tf.keras.layers.StringLookup(vocabulary=VOCAB_FILE, invert=True)
+    logging.info(string_lookup(tf.constant(predictions)))
+
 
 
 if __name__ == "__main__":
