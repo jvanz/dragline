@@ -112,15 +112,14 @@ update-conda-env:
 	conda env export -n $(ENV_NAME) > $(ENV_NAME)_env.yml
 
 .PHONY: train-autoencoder
-train-autoencoder: format
+train-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
+train-autoencoder:
 	$(call python_script, scripts/text_autoencoder.py)
 
-.PHONY: partial-train-autoencoder
-partial-train-autoencoder:
-	DATA_FILE=data/wikipedia_20220220_pt_partial.csv DATASET_SIZE=1000 python scripts/text_autoencoder.py
 
 .PHONY: train-transformer-autoencoder
-train-transformer-autoencoder: format
+train-transformer-autoencoder:
+train-transformer-autoencoder:
 	$(call python_script, scripts/text_autoencoder_transformer.py)
 
 .PHONY: download_wikipedia_dataset
