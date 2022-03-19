@@ -18,7 +18,9 @@ def main():
 
     dataset = WikipediaDataset(WIKIPEDIA_DATA_DIR)
 
-    vectorize_layer = tf.keras.layers.TextVectorization(output_mode="int", max_tokens=VOCAB_SIZE)
+    vectorize_layer = tf.keras.layers.TextVectorization(
+        output_mode="int", max_tokens=VOCAB_SIZE
+    )
 
     logging.info(f"Adapting TextVectorization layers")
     vectorize_layer.adapt(dataset)
@@ -27,9 +29,7 @@ def main():
     logging.info(f"Vocabulary size: {vectorize_layer.vocabulary_size()}")
 
     with open(VOCAB_FILE, "w") as vocab:
-        for token in vectorize_layer.get_vocabulary():
-            if len(token) == 0:
-                continue
+        for token in vectorize_layer.get_vocabulary(include_special_tokens=False):
             vocab.write(token)
             vocab.write("\n")
 
