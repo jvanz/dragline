@@ -3,6 +3,7 @@ import os
 import string
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures import as_completed
+import json
 
 import transformers
 from datasets import load_dataset
@@ -11,6 +12,7 @@ import tensorflow as tf
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
+MAX_WORKERS = 10
 
 
 def has_no_minimum_words(sentence):
@@ -60,35 +62,46 @@ def get_wikipedia_dataset(
     datasets = datasets.map(
         sentence_segmentation, batched=True, remove_columns="title", num_proc=6
     )
+    datasets = datasets["train"].train_test_split(shuffle=True, keep_in_memory=False)
+    dataset_eval_test = datasets["test"].train_test_split(
+        test_size=0.5, shuffle=False, keep_in_memory=False
+    )
+    datasets["evaluation"] = dataset_eval_test["train"]
+    datasets["test"] = dataset_eval_test["test"]
     return datasets
 
 
-def dataset_generator():
+def load_datasets():
     dataset_name = "wikipedia"
     dataset_language = "pt"
     dataset_date = "20220220"
     datasets = get_wikipedia_dataset(dataset_name, dataset_language, dataset_date)
-    for dataset_name in datasets:
-        for batch in datasets[dataset_name].to_dict(batched=True):
+    metadata = {
+        "name": dataset_name,
+        "languange": dataset_language,
+        "date": dataset_date,
+    }
+    for dataset_split_name in datasets:
+        metadata[dataset_split_name] = {"length": len(datasets[dataset_split_name])}
+    return datasets, metadata
+
+
+def write_wikipedia_file(datasets):
+    for dataset_split_name in datasets:
+        datasets[dataset_split_name].to_csv(
+            f"{DATA_DIR}/wikipedia/{dataset_split_name}.csv",
+            num_proc=MAX_WORKERS,
+            quoting=csv.QUOTE_ALL,
+            index=False,
+        )
+
+
+def load_tf_dataset(dataset):
+    def dataset_generator():
+        for batch in dataset.to_dict(batched=True):
             for sample in batch["text"]:
                 yield (bytes(sample, "utf8"),)
 
-
-def write_wikipedia_file():
-    print("Writing Wikipedia file.")
-    dataset_name = "wikipedia"
-    dataset_language = "pt"
-    dataset_date = "20220220"
-    dataset = get_wikipedia_dataset(dataset_name, dataset_language, dataset_date)
-    dataset["train"].to_csv(
-        f"{DATA_DIR}/{dataset_name}_{dataset_date}_{dataset_language}.csv",
-        num_proc=6,
-        quoting=csv.QUOTE_ALL,
-        index=False,
-    )
-
-
-def load_sentence_dataset():
     return tf.data.Dataset.from_generator(
         dataset_generator, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string),),
     )
@@ -99,42 +112,52 @@ def write_tfrecord_file(filepath, batch):
     with tf.io.TFRecordWriter(filepath) as file_writer:
         for sample in batch[0]:
             file_writer.write(serialize_sample(sample.numpy()))
-    return f"{filepath} written"
+
+
+def write_tfrecord_files(datasets):
+    results = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        for dataset_split_name in datasets:
+            sentences_dataset = load_tf_dataset(datasets[dataset_split_name])
+            counter = 0
+            for batch in sentences_dataset.batch(BATCH_SIZE):
+                results.append(
+                    executor.submit(
+                        write_tfrecord_file,
+                        filepath=f"{DATA_DIR}/wikipedia/{dataset_split_name}/{counter}.tfrecords",
+                        batch=batch,
+                    )
+                )
+                counter += 1
+
+    total_files_written = 0
+    futures_completed = 0
+    for result in as_completed(results):
+        futures_completed += 1
+        try:
+            result_returned = result.result()
+            total_files_written += 1
+        except Exception as e:
+            print(e)
+
+    print(f"Futures completed: {futures_completed}")
+    print(f"Total files written: {total_files_written}")
 
 
 def main():
 
-    if not os.path.exists(DATA_DIR):
-        os.makedirs(DATA_DIR)
-    if not os.path.exists(f"{DATA_DIR}/wikipedia"):
-        os.makedirs(f"{DATA_DIR}/wikipedia")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/wikipedia", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/wikipedia/train", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/wikipedia/test", exist_ok=True)
+    os.makedirs(f"{DATA_DIR}/wikipedia/evaluation", exist_ok=True)
 
-    write_wikipedia_file()
-    results = []
-    with ThreadPoolExecutor(max_workers=6) as executor:
-        sentences_dataset = load_sentence_dataset()
-        counter = 0
-        for batch in sentences_dataset.batch(BATCH_SIZE):
-            results.append(
-                executor.submit(
-                    write_tfrecord_file,
-                    filepath=f"{DATA_DIR}/wikipedia/{counter}_wikidata.tfrecords",
-                    batch=batch,
-                )
-            )
-            counter += 1
+    datasets, metadata = load_datasets()
+    write_wikipedia_file(datasets)
+    write_tfrecord_files(datasets)
 
-    total_files_written = 0
-    for result in results:
-        try:
-            result_returned = result.result()
-            if result_returned:
-                total_files_written += 1
-                print(result_returned)
-        except Exception as e:
-            print(e)
-
-    print("Total files written: {total_files_written}")
+    with open(f"{DATA_DIR}/wikipedia/metadata.json", "w") as metadatafile:
+        json.dump(metadata, metadatafile)
 
 
 if __name__ == "__main__":
