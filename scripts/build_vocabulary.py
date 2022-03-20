@@ -16,11 +16,9 @@ def main():
     logging.info(VOCAB_FILE)
     logging.info(VOCAB_SIZE)
 
-    dataset = WikipediaDataset(WIKIPEDIA_DATA_DIR)
+    dataset = WikipediaDataset(f"{WIKIPEDIA_DATA_DIR}/train")
 
-    vectorize_layer = tf.keras.layers.TextVectorization(
-        output_mode="int", max_tokens=VOCAB_SIZE
-    )
+    vectorize_layer = tf.keras.layers.TextVectorization(output_mode="int")
 
     logging.info(f"Adapting TextVectorization layers")
     vectorize_layer.adapt(dataset)
