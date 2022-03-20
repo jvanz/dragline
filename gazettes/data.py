@@ -3,22 +3,44 @@ import re
 import os
 import csv
 from urllib.parse import urlparse
+import logging
 
 from bs4 import BeautifulSoup
+from transformers import AutoTokenizer
 
 import tensorflow as tf
 
 
 def decode_fn(encoded_example):
-    return tf.io.parse_single_example(
+    return tf.io.parse_example(
         encoded_example,
         {"text": tf.io.FixedLenFeature([], dtype=tf.string, default_value="")},
     )["text"]
 
 
+def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
+    if not cache_subdirectory:
+        raise "Missing cache subdirectory"
+    cache_dir = None
+    if fallback_dir:
+        cache_dir = os.environ.get(
+            "CACHE_DIR", f"{fallback_dir}/cache/{cache_subdirectory}"
+        )
+    else:
+        cache_dir = os.environ["CACHE_DIR"]
+        cache_dir = f"{cache_dir}/{cache_subdirectory}"
+    os.makedirs(cache_dir, exist_ok=True)
+    logging.info(f"CACHE_DIR={cache_dir}")
+    return cache_dir
+
+
 class WikipediaDataset(tf.data.Dataset):
-    def __new__(cls, data_dir: str, parallel_file_read=4):
+    def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=256):
+        logging.info(f"Loading: {data_dir}")
         datafiles = os.listdir(data_dir)
+        datafiles.sort()
+        datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
+        logging.info(datafiles[0])
         if "WIKIPEDIA_DATA_FILES_COUNT" in os.environ:
             file_count = int(os.environ["WIKIPEDIA_DATA_FILES_COUNT"])
             datafiles = os.listdir(data_dir)[:file_count]
@@ -26,9 +48,13 @@ class WikipediaDataset(tf.data.Dataset):
         dataset = tf.data.TFRecordDataset(
             datafiles, num_parallel_reads=parallel_file_read
         )
-        dataset.cache().prefetch(buffer_size=tf.data.AUTOTUNE)
-        dataset = dataset.map(decode_fn)
-        return dataset
+        dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+        dataset = (
+            dataset.batch(batch_size)
+            .map(decode_fn)
+            .cache(get_cache_dir(data_dir, f"cache_load_data"))
+        )
+        return dataset.unbatch()
 
 
 def load_gazettes_csv():
