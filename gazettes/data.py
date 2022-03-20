@@ -30,17 +30,14 @@ def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
         cache_dir = os.environ["CACHE_DIR"]
         cache_dir = f"{cache_dir}/{cache_subdirectory}"
     os.makedirs(cache_dir, exist_ok=True)
-    logging.info(f"CACHE_DIR={cache_dir}")
     return cache_dir
 
 
 class WikipediaDataset(tf.data.Dataset):
     def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=256):
-        logging.info(f"Loading: {data_dir}")
         datafiles = os.listdir(data_dir)
         datafiles.sort()
         datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
-        logging.info(datafiles[0])
         if "WIKIPEDIA_DATA_FILES_COUNT" in os.environ:
             file_count = int(os.environ["WIKIPEDIA_DATA_FILES_COUNT"])
             datafiles = os.listdir(data_dir)[:file_count]
@@ -55,6 +52,47 @@ class WikipediaDataset(tf.data.Dataset):
             .cache(get_cache_dir(data_dir, f"cache_load_data"))
         )
         return dataset.unbatch()
+
+
+class TextAutoencoderWikipediaDataset(tf.data.Dataset):
+    def __new__(
+        cls,
+        data_dir: str,
+        parallel_file_read: int = 4,
+        batch_size: int = 256,
+        max_text_length: int = 64,
+        vocabulary: str = None,
+        vocabulary_size: int = 0,
+        num_parallel_calls: int = tf.data.AUTOTUNE,
+    ):
+        dataset = WikipediaDataset(data_dir)
+
+        vectorize_layer = tf.keras.layers.TextVectorization(
+            output_mode="int",
+            output_sequence_length=max_text_length,
+            name="vectorization_layer",
+            vocabulary=vocabulary,
+            max_tokens=vocabulary_size,
+        )
+
+        def preprocess_text(text):
+            vectorized_text = vectorize_layer(text)
+            vectorized_target = tf.one_hot(vectorize_layer(text), vocabulary_size)
+            return (vectorized_text, vectorized_target)
+
+        dataset = (
+            dataset.batch(batch_size)
+            .map(
+                preprocess_text,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=False,
+            )
+            .cache(get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),)
+        )
+
+        dataset.vectorize_layer = vectorize_layer
+        return dataset.unbatch()
+
 
 
 def load_gazettes_csv():

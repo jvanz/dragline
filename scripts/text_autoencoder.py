@@ -6,7 +6,10 @@ import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 
-from gazettes.data import WikipediaDataset
+from gazettes.data import (
+    TextAutoencoderWikipediaDataset,
+    load_wikipedia_metadata,
+)
 
 
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
@@ -17,9 +20,7 @@ VOCAB_FILE = str(os.environ["VOCAB_FILE"])
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
-NUM_PARALLEL_CALLS = tf.data.AUTOTUNE
-if "NUM_PARALLEL_CALLS" in os.environ:
-    NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS"))
+NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
 DEFAULT_MODEL_NAME = "text_autoencoder"
 MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
@@ -76,22 +77,8 @@ def create_or_load_model():
     return model
 
 
-def get_dataset_pertitions(
-    dataset, dataset_size, train_split=0.8, evaluation_split=0.1, test_split=0.1,
-):
-    assert train_split + evaluation_split + test_split == 1
-
-    dataset = dataset.shuffle(dataset_size, seed=7)
-
-    train_size = int(dataset_size * train_split)
-    evaluation_size = int(dataset_size * evaluation_split)
-    test_size = int(dataset_size * test_split)
-
-    train_dataset = dataset.take(train_size)
-    evaluation_dataset = dataset.skip(train_size).take(evaluation_size)
-    test_dataset = dataset.skip(train_size + evaluation_size).take(test_size)
-
-    return train_dataset, evaluation_dataset, test_dataset
+def save_model(model, model_name: str):
+    model.save(f"models/{model_name}", overwrite=True)
 
 
 def train_model(model, train_dataset, validation_dataset, test_dataset):
@@ -130,7 +117,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     print()
     print(f"Model evaluation: {results}")
     print()
-    model.save("models/text_autoencoder", overwrite=True)
+    save_model(model, MODEL_NAME)
 
 
 def get_logits(predictions):
@@ -139,6 +126,34 @@ def get_logits(predictions):
         sentence = np.argmax(sentence, axis=1)
         sentences.append(sentence)
     return np.asarray(sentences)
+
+
+def load_datasets():
+    train_dataset = TextAutoencoderWikipediaDataset(
+        f"{WIKIPEDIA_DATA_DIR}/train",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+        max_text_length=MAX_TEXT_LENGTH,
+        vocabulary=VOCAB_FILE,
+        vocabulary_size=VOCAB_SIZE,
+    )
+    eval_dataset = TextAutoencoderWikipediaDataset(
+        f"{WIKIPEDIA_DATA_DIR}/evaluation",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+        max_text_length=MAX_TEXT_LENGTH,
+        vocabulary=VOCAB_FILE,
+        vocabulary_size=VOCAB_SIZE,
+    )
+    test_dataset = TextAutoencoderWikipediaDataset(
+        f"{WIKIPEDIA_DATA_DIR}/test",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+        max_text_length=MAX_TEXT_LENGTH,
+        vocabulary=VOCAB_FILE,
+        vocabulary_size=VOCAB_SIZE,
+    )
+    return train_dataset, eval_dataset, test_dataset
 
 
 def main():
@@ -160,35 +175,13 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    dataset = WikipediaDataset(WIKIPEDIA_DATA_DIR)
-
-    vectorize_layer = tf.keras.layers.TextVectorization(
-        output_mode="int",
-        output_sequence_length=MAX_TEXT_LENGTH,
-        name="vectorization_layer",
-        vocabulary=VOCAB_FILE,
-    )
-
-    def preprocess_text(text):
-        vectorized_text = vectorize_layer(text)
-        vectorized_target = tf.one_hot(vectorize_layer(text), VOCAB_SIZE)
-        return (vectorized_text, vectorized_target)
-
-    dataset = dataset.map(
-        preprocess_text, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False
-    )
-
-    def filter_invalid_shapes(text, target):
-        return tf.shape(text)[0] == MAX_TEXT_LENGTH
-
-    dataset = dataset.filter(filter_invalid_shapes)
-    logging.info(list(dataset.take(1)))
+    train_dataset, eval_dataset, test_dataset = load_datasets()
+    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
+    logging.info(metadata)
+    logging.info(list(train_dataset.take(1)))
 
     model = create_or_load_model()
-    train_dataset, validation_dataset, test_dataset = get_dataset_pertitions(
-        dataset, WIKIPEDIA_DATASET_SIZE
-    )
-    train_model(model, train_dataset, validation_dataset, test_dataset)
+    train_model(model, train_dataset, eval_dataset, test_dataset)
     test_dataset = test_dataset.map(lambda inputt, target: inputt)
     logging.info("Test dataset:")
     logging.info(list(test_dataset.take(1)))
@@ -201,13 +194,10 @@ def main():
             deterministic=False,
         )
     )
-    logging.info(predictions[0])
-    logging.info(predictions.shape)
+    logging.info(predictions)
+    logging.info("-----------------------")
     predictions = get_logits(predictions)
-    logging.info(predictions[0])
-    string_lookup = tf.keras.layers.StringLookup(vocabulary=VOCAB_FILE, invert=True)
-    logging.info(string_lookup(tf.constant(predictions)))
-
+    logging.info(predictions)
 
 
 if __name__ == "__main__":
