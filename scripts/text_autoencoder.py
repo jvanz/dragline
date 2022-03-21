@@ -128,7 +128,14 @@ def get_logits(predictions):
     return np.asarray(sentences)
 
 
-def load_datasets():
+def load_datasets(partial_load: float = 1.0):
+    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
+    train_size = int(metadata["train"]["length"] * partial_load)
+    logging.info(f"train_size = {train_size}")
+    evaluation_size = int(metadata["evaluation"]["length"] * partial_load)
+    logging.info(f"evaluation_size = {evaluation_size}")
+    test_size = int(metadata["test"]["length"] * partial_load)
+    logging.info(f"test_size = {test_size}")
     train_dataset = TextAutoencoderWikipediaDataset(
         f"{WIKIPEDIA_DATA_DIR}/train",
         parallel_file_read=NUM_PARALLEL_CALLS,
@@ -136,7 +143,7 @@ def load_datasets():
         max_text_length=MAX_TEXT_LENGTH,
         vocabulary=VOCAB_FILE,
         vocabulary_size=VOCAB_SIZE,
-    )
+    ).take(train_size)
     eval_dataset = TextAutoencoderWikipediaDataset(
         f"{WIKIPEDIA_DATA_DIR}/evaluation",
         parallel_file_read=NUM_PARALLEL_CALLS,
@@ -144,7 +151,7 @@ def load_datasets():
         max_text_length=MAX_TEXT_LENGTH,
         vocabulary=VOCAB_FILE,
         vocabulary_size=VOCAB_SIZE,
-    )
+    ).take(evaluation_size)
     test_dataset = TextAutoencoderWikipediaDataset(
         f"{WIKIPEDIA_DATA_DIR}/test",
         parallel_file_read=NUM_PARALLEL_CALLS,
@@ -152,7 +159,7 @@ def load_datasets():
         max_text_length=MAX_TEXT_LENGTH,
         vocabulary=VOCAB_FILE,
         vocabulary_size=VOCAB_SIZE,
-    )
+    ).take(test_size)
     return train_dataset, eval_dataset, test_dataset
 
 
@@ -175,7 +182,7 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    train_dataset, eval_dataset, test_dataset = load_datasets()
+    train_dataset, eval_dataset, test_dataset = load_datasets(0.1)
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
     logging.info(metadata)
     logging.info(list(train_dataset.take(1)))
