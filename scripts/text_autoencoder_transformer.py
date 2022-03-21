@@ -8,7 +8,7 @@ from transformers import (
 import tensorflow as tf
 import numpy as np
 
-from gazettes.data import WikipediaDataset
+from gazettes.data import TextBertAutoencoderWikipediaDataset, load_wikipedia_metadata
 
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
 WIKIPEDIA_DATASET_SIZE = int(os.environ.get("WIKIPEDIA_DATASET_SIZE", 16450980))
@@ -17,9 +17,7 @@ VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
-NUM_PARALLEL_CALLS = tf.data.AUTOTUNE
-if "NUM_PARALLEL_CALLS" in os.environ:
-    NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS"))
+NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
 DEFAULT_MODEL_NAME = "text_transformer_autoencoder"
 MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
@@ -31,16 +29,6 @@ VOCAB_FILE = os.environ.get("VOCAB_FILE", "data/bertimbau_base_vocab.txt")
 
 def load_bertimbau_model():
     return TFBertModel.from_pretrained(MODEL_CHECKPOINT, from_pt=True)
-
-
-def load_tokenizer():
-    return AutoTokenizer.from_pretrained(
-        MODEL_CHECKPOINT,
-        use_fast=False,
-        vocab_file=VOCAB_FILE,
-        clean_text=True,
-        do_lower_case=True,
-    )
 
 
 def create_model():
@@ -96,88 +84,68 @@ def create_model():
     return model
 
 
-def get_dataset_partitions(
-    dataset, dataset_size, train_split=0.8, evaluation_split=0.1, test_split=0.1,
-):
-    assert train_split + evaluation_split + test_split == 1
-
-    dataset = dataset.shuffle(dataset_size, seed=7)
-
-    train_size = int(dataset_size * train_split)
-    evaluation_size = int(dataset_size * evaluation_split)
-    test_size = int(dataset_size * test_split)
-
-    train_dataset = dataset.take(train_size)
-    evaluation_dataset = dataset.skip(train_size).take(evaluation_size)
-    test_dataset = dataset.skip(train_size + evaluation_size).take(test_size)
-
-    return train_dataset, evaluation_dataset, test_dataset
-
-
-def print_some_records(dataset, num=1):
-    for record in dataset.take(num):
-        logging.info(repr(record))
-
-
-def assert_one_hot(dataset):
-    for record in dataset.take(1):
-        for index, word_index in enumerate(record[0][0]):
-            assert record[1][index][word_index] == 1.0
-
-
-def load_data():
-    tokenizer = load_tokenizer()
-    dataset = WikipediaDataset(WIKIPEDIA_DATA_DIR)
-    print_some_records(dataset)
-
-    def preprocess_text(text):
-        tokenizer_output = tokenizer(
-            text.numpy().decode("utf8"),
-            padding="max_length",
-            truncation=True,
-            max_length=MAX_TEXT_LENGTH,
+def load_data(partial_load: float = 1.0):
+    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
+    train_size = int(metadata["train"]["length"] * partial_load)
+    logging.info(f"train_size = {train_size}")
+    evaluation_size = int(metadata["evaluation"]["length"] * partial_load)
+    logging.info(f"evaluation_size = {evaluation_size}")
+    test_size = int(metadata["test"]["length"] * partial_load)
+    logging.info(f"test_size = {test_size}")
+    train_dataset = (
+        TextBertAutoencoderWikipediaDataset(
+            f"{WIKIPEDIA_DATA_DIR}/train",
+            parallel_file_read=NUM_PARALLEL_CALLS,
+            batch_size=BATCH_SIZE,
+            max_text_length=MAX_TEXT_LENGTH,
+            vocabulary=VOCAB_FILE,
+            vocabulary_size=VOCAB_SIZE,
         )
-        return (
-            tokenizer_output["input_ids"],
-            tokenizer_output["token_type_ids"],
-            tokenizer_output["attention_mask"],
-            tokenizer_output["input_ids"],
+        .take(train_size)
+        .batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
         )
-
-    def tf_preprocess_text(text):
-        preprocessed_text = tf.py_function(
-            preprocess_text,
-            [text],
-            [
-                tf.TensorSpec(
-                    shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="input_ids"
-                ),
-                tf.TensorSpec(
-                    shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="token_type_ids",
-                ),
-                tf.TensorSpec(
-                    shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="attention_mask",
-                ),
-                tf.TensorSpec(shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="target"),
-            ],
-        )
-        return [tf.reshape(tensor, [MAX_TEXT_LENGTH,]) for tensor in preprocessed_text]
-
-    dataset = dataset.map(
-        tf_preprocess_text, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False
     )
-    print_some_records(dataset)
 
-    def organize_targets(input_ids, token_type_ids, attention_mask, target):
-        return (
-            (input_ids, token_type_ids, attention_mask),
-            tf.one_hot(target, VOCAB_SIZE),
+    eval_dataset = (
+        TextBertAutoencoderWikipediaDataset(
+            f"{WIKIPEDIA_DATA_DIR}/evaluation",
+            parallel_file_read=NUM_PARALLEL_CALLS,
+            batch_size=BATCH_SIZE,
+            max_text_length=MAX_TEXT_LENGTH,
+            vocabulary=VOCAB_FILE,
+            vocabulary_size=VOCAB_SIZE,
         )
+        .take(evaluation_size)
+        .batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
+        )
+    )
 
-    dataset = dataset.map(organize_targets)
-    print_some_records(dataset)
-
-    return get_dataset_partitions(dataset, WIKIPEDIA_DATASET_SIZE)
+    test_dataset = (
+        TextBertAutoencoderWikipediaDataset(
+            f"{WIKIPEDIA_DATA_DIR}/test",
+            parallel_file_read=NUM_PARALLEL_CALLS,
+            batch_size=BATCH_SIZE,
+            max_text_length=MAX_TEXT_LENGTH,
+            vocabulary=VOCAB_FILE,
+            vocabulary_size=VOCAB_SIZE,
+        )
+        .take(test_size)
+        .batch(
+            BATCH_SIZE,
+            drop_remainder=True,
+            num_parallel_calls=NUM_PARALLEL_CALLS,
+            deterministic=False,
+        )
+    )
+    return train_dataset, eval_dataset, test_dataset
 
 
 def get_checkpoint_dir(model):
@@ -196,33 +164,17 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_best_only=True,
     )
     model.fit(
-        train_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        ),
-        validation_data=validation_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        ),
+        train_dataset,
+        validation_data=validation_dataset,
         epochs=EPOCHS,
         callbacks=[model_checkpoint_callback],
     )
-    results = model.evaluate(
-        test_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
+    results = model.evaluate(test_dataset)
     print()
     print(f"Model evaluation: {results}")
     print()
     model.save(f"models/{MODEL_NAME}", overwrite=True)
+
 
 def get_logits(predictions):
     sentences = []
@@ -230,6 +182,7 @@ def get_logits(predictions):
         sentence = np.argmax(sentence, axis=1)
         sentences.append(sentence)
     return np.asarray(sentences)
+
 
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
@@ -250,18 +203,12 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    train_dataset, validation_dataset, test_dataset = load_data()
+    train_dataset, eval_dataset, test_dataset = load_data(0.1)
+    logging.info(list(train_dataset.take(1)))
     model = create_model()
-    train_model(model, train_dataset, validation_dataset, test_dataset)
+    train_model(model, train_dataset, eval_dataset, test_dataset)
 
-    predictions = model.predict(
-        test_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
+    predictions = model.predict(test_dataset)
     logging.info(predictions[0])
     logging.info(predictions.shape)
     predictions = get_logits(predictions)

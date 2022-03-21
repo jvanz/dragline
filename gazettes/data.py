@@ -42,8 +42,12 @@ class WikipediaDataset(tf.data.Dataset):
             file_count = int(os.environ["WIKIPEDIA_DATA_FILES_COUNT"])
             datafiles = os.listdir(data_dir)[:file_count]
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
-        dataset = tf.data.TFRecordDataset(
-            datafiles, num_parallel_reads=parallel_file_read
+        dataset = tf.data.Dataset.from_tensor_slices(datafiles)
+        dataset = dataset.interleave(
+            lambda datafile: tf.data.TFRecordDataset(datafile),
+            cycle_length=tf.data.AUTOTUNE,
+            num_parallel_calls=tf.data.AUTOTUNE,
+            deterministic=False,
         )
         dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
         dataset = (
@@ -92,6 +96,87 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
 
         dataset.vectorize_layer = vectorize_layer
         return dataset.unbatch()
+
+
+def load_bert_tokenizer(model_checkpoint: str, vocab_file: str):
+    return AutoTokenizer.from_pretrained(
+        model_checkpoint,
+        use_fast=False,
+        vocab_file=vocab_file,
+        clean_text=True,
+        do_lower_case=True,
+    )
+
+
+class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
+    def __new__(
+        cls,
+        data_dir: str,
+        parallel_file_read: int = 4,
+        batch_size: int = 1000,
+        max_text_length: int = 64,
+        vocabulary: str = None,
+        vocabulary_size: int = 0,
+        num_parallel_calls: int = tf.data.AUTOTUNE,
+        model_checkpoint: str = "neuralmind/bert-base-portuguese-cased",
+    ):
+        dataset = WikipediaDataset(data_dir)
+        tokenizer = load_bert_tokenizer(model_checkpoint, vocabulary)
+
+        def preprocess_text(text):
+            tokenizer_output = tokenizer(
+                text.numpy().decode("utf8"),
+                padding="max_length",
+                truncation=True,
+                max_length=max_text_length,
+            )
+            return (
+                tokenizer_output["input_ids"],
+                tokenizer_output["token_type_ids"],
+                tokenizer_output["attention_mask"],
+                tokenizer_output["input_ids"],
+            )
+
+        def tf_preprocess_text(text):
+            preprocessed_text = tf.py_function(
+                preprocess_text,
+                [text],
+                [
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="input_ids"
+                    ),
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="token_type_ids",
+                    ),
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
+                    ),
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="target"
+                    ),
+                ],
+            )
+            return [
+                tf.reshape(tensor, [max_text_length,]) for tensor in preprocessed_text
+            ]
+
+        dataset = dataset.map(
+            tf_preprocess_text,
+            num_parallel_calls=num_parallel_calls,
+            deterministic=False,
+        ).cache(get_cache_dir(data_dir, "transformer_preprocessing"),)
+        logging.info(list(dataset.take(1)))
+
+        def organize_targets(input_ids, token_type_ids, attention_mask, target):
+            return (
+                (input_ids, token_type_ids, attention_mask),
+                tf.one_hot(target, vocabulary_size),
+            )
+
+        dataset = dataset.map(organize_targets).cache(
+            get_cache_dir(data_dir, "transformer_one_hot_target")
+        )
+        return dataset
 
 
 def load_wikipedia_metadata(data_dir: str):
