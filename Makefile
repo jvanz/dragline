@@ -26,15 +26,12 @@ BATCH_SIZE ?= 32
 
 python_script = PYTHONPATH=$(PWD) \
 	TF_CPP_MIN_LOG_LEVEL=2 \
-	DATA_FILE=$(DATA_FILE) \
-	DATASET_SIZE=$(DATASET_SIZE) \
 	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
 	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
 	WIKIPEDIA_DATA_FILES_COUNT=$(WIKIPEDIA_DATA_FILES_COUNT) \
 	VOCAB_SIZE=$(VOCAB_SIZE) \
 	VOCAB_FILE=$(VOCAB_FILE) \
 	MODEL_PATH=$(MODEL_PATH) \
-	SENTENCES_FILE=$(SENTENCES_FILE) \
 	BATCH_SIZE=$(BATCH_SIZE) \
 	python $(1)
 
@@ -152,3 +149,14 @@ build-vocab: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
 build-vocab:
 	$(call python_script, scripts/build_vocabulary.py)
 
+
+.PHONY: clean-cache
+clean-cache:
+	rm -rf $(WIKIPEDIA_DATA_DIR)/cache
+	rm -rf $(WIKIPEDIA_DATA_DIR)/train/cache
+	rm -rf $(WIKIPEDIA_DATA_DIR)/test/cache
+	rm -rf $(WIKIPEDIA_DATA_DIR)/evaluation/cache
+
+.PHONY: clean-wikipedia
+clean-wikipedia:
+	rm -rf $(WIKIPEDIA_DATA_DIR)
