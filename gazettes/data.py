@@ -94,6 +94,10 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
         return dataset.unbatch()
 
 
+def load_wikipedia_metadata(data_dir: str):
+    with open(f"{data_dir}/metadata.json", "r") as metadatafile:
+        return json.load(metadatafile)
+
 
 def load_gazettes_csv():
     with open("data/gazettes_unix.csv", "r") as csvfile:
