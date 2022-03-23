@@ -38,9 +38,6 @@ class WikipediaDataset(tf.data.Dataset):
         datafiles = os.listdir(data_dir)
         datafiles.sort()
         datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
-        if "WIKIPEDIA_DATA_FILES_COUNT" in os.environ:
-            file_count = int(os.environ["WIKIPEDIA_DATA_FILES_COUNT"])
-            datafiles = os.listdir(data_dir)[:file_count]
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
         dataset = tf.data.Dataset.from_tensor_slices(datafiles)
         dataset = dataset.interleave(

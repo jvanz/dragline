@@ -11,28 +11,28 @@ APACHE_TIKA_IMAGE_NAME ?= apache-tika
 APACHE_TIKA_IMAGE_TAG ?= latest
 APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
-DATA_DIR ?= "data"
-ENV_NAME ?= $(shell conda env export --json | jq ".name")
-DATA_FILE ?= "$(DATA_DIR)/wikipedia_20220220_pt.csv"
-WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
-WIKIPEDIA_DATA_FILES_COUNT ?= $(shell ls -l $(WIKIPEDIA_DATA_DIR) | wc -l)
-WIKIPEDIA_DATASET_SIZE ?= $$(( $(WIKIPEDIA_DATA_FILES_COUNT) * 1000 ))
-VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
-DATASET_SIZE ?= $(shell expr `cat $(DATA_FILE) | wc -l` - 1)
-VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
-MODEL_PATH ?= "models/text_transformer_autoencoder"
-SENTENCES_FILE ?= "$(DATA_FILE)/sentences_to_predict"
 BATCH_SIZE ?= 32
+DATASET_SIZE ?= $(shell expr `cat $(DATA_FILE) | wc -l` - 1)
+DATA_DIR ?= "data"
+DATA_FILE ?= "$(DATA_DIR)/wikipedia_20220220_pt.csv"
+ENV_NAME ?= $(shell conda env export --json | jq ".name")
+MODEL_NAME ?= "text_autoencoder"
+MODEL_PATH ?= "models/$(MODEL_NAME)"
+SENTENCES_FILE ?= "$(DATA_FILE)/sentences_to_predict"
+VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
+VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
+WIKIPEDIA_DATASET_SIZE ?= 1.0
+WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
 
 python_script = PYTHONPATH=$(PWD) \
-	TF_CPP_MIN_LOG_LEVEL=2 \
-	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
-	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
-	WIKIPEDIA_DATA_FILES_COUNT=$(WIKIPEDIA_DATA_FILES_COUNT) \
-	VOCAB_SIZE=$(VOCAB_SIZE) \
-	VOCAB_FILE=$(VOCAB_FILE) \
-	MODEL_PATH=$(MODEL_PATH) \
 	BATCH_SIZE=$(BATCH_SIZE) \
+	MODEL_NAME=$(MODEL_NAME) \
+	MODEL_PATH=$(MODEL_PATH) \
+	TF_CPP_MIN_LOG_LEVEL=2 \
+	VOCAB_FILE=$(VOCAB_FILE) \
+	VOCAB_SIZE=$(VOCAB_SIZE) \
+	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
+	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
 	python $(1)
 
 .PHONY: download-models
@@ -137,7 +137,6 @@ show_data_info:
 	@echo Vocabulary file: $(VOCAB_FILE)
 	@echo Vocabulary file size: $(VOCAB_SIZE)
 	@echo Wikipedia data dir: $(WIKIPEDIA_DATA_DIR)
-	@echo Wikipedia data files: $(WIKIPEDIA_DATA_FILES_COUNT)
 	@echo Wikipedia dataset size: $(WIKIPEDIA_DATASET_SIZE)
 
 .PHONY: predict
