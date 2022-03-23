@@ -13,7 +13,7 @@ from gazettes.data import (
 
 
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
-WIKIPEDIA_DATASET_SIZE = int(os.environ.get("WIKIPEDIA_DATASET_SIZE", 16450980))
+WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
 MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
 VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 VOCAB_FILE = str(os.environ["VOCAB_FILE"])
@@ -22,8 +22,8 @@ EPOCHS = int(os.environ.get("EPOCHS", 10))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
 NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
-DEFAULT_MODEL_NAME = "text_autoencoder"
-MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
+MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
+MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
 
 def get_checkpoint_dir(model):
@@ -65,7 +65,7 @@ def create_model():
     model.compile(
         loss=tf.keras.losses.CategoricalCrossentropy(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-        metrics=["acc"],
+        metrics=["categorical_crossentropy"],
     )
     return model
 
@@ -77,8 +77,8 @@ def create_or_load_model():
     return model
 
 
-def save_model(model, model_name: str):
-    model.save(f"models/{model_name}", overwrite=True)
+def save_model(model, model_path: str):
+    model.save(model_path, overwrite=True)
 
 
 def train_model(model, train_dataset, validation_dataset, test_dataset):
@@ -90,6 +90,10 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         mode="max",
         save_best_only=False,
     )
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(
+        monitor="loss", min_delta=1e-2, patience=3
+    )
+
     model.fit(
         train_dataset.batch(
             BATCH_SIZE,
@@ -104,7 +108,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
             deterministic=False,
         ),
         epochs=EPOCHS,
-        callbacks=[model_checkpoint_callback],
+        callbacks=[model_checkpoint_callback, early_stop_callback],
     )
     results = model.evaluate(
         test_dataset.batch(
@@ -117,7 +121,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     print()
     print(f"Model evaluation: {results}")
     print()
-    save_model(model, MODEL_NAME)
+    save_model(model, MODEL_PATH)
 
 
 def get_logits(predictions):
@@ -182,7 +186,7 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    train_dataset, eval_dataset, test_dataset = load_datasets(0.1)
+    train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
     logging.info(metadata)
     logging.info(list(train_dataset.take(1)))
