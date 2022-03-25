@@ -4,6 +4,7 @@ import string
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures import as_completed
 import json
+import re
 
 import transformers
 from datasets import load_dataset
@@ -13,22 +14,50 @@ import tensorflow as tf
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
 MAX_WORKERS = 10
+MINIMUM_SENTENCE_WORD_COUNT = 16
+
+VALID_SENTENCE_REGEX = r"^[\s\w,]+$"
 
 
-def has_no_minimum_words(sentence):
-    return len(sentence.split(" ")) <= 5
+def has_no_minimum_words_count(
+    sentence, minimum_word_count=MINIMUM_SENTENCE_WORD_COUNT
+):
+    return len(sentence.split(" ")) < minimum_word_count
 
 
-def has_invalid_char(sentence):
-    return "|" in sentence
+def is_invalid_sentence(sentence):
+    return re.match(VALID_SENTENCE_REGEX, sentence) is None
+
+
+def remove_multiple_whitespaces(sentence):
+    return " ".join(sentence.split())
+
+
+def remove_new_line(sentence):
+    return sentence.replace("\n", " ").strip()
+
+
+def should_reject_sentence(sentence):
+    return is_invalid_sentence(sentence) or has_no_minimum_words_count(sentence)
+
+
+def remove_titles(text):
+    sentences = []
+    for sentence in text.splitlines():
+        sentence = sentence.strip()
+        if has_no_minimum_words_count(sentence, 3):
+            continue
+        sentences.append(sentence)
+    return " ".join(sentences)
 
 
 def sentence_segmentation(sample):
     sentences = []
     for text in sample["text"]:
-        for sentence in text.split("."):
-            sentence = sentence.replace("\n", " ").strip()
-            if has_no_minimum_words(sentence) or has_invalid_char(sentence):
+        text = remove_titles(text)
+        text = remove_multiple_whitespaces(text)
+        for sentence in text.split(". "):
+            if should_reject_sentence(sentence):
                 continue
             sentences.append(sentence)
     sample = {"text": sentences}
@@ -59,8 +88,20 @@ def get_wikipedia_dataset(
         date=dataset_date,
         beam_runner="DirectRunner",
     )
+    datasets["train"].to_csv(
+        f"{DATA_DIR}/wikipedia/all.csv",
+        num_proc=MAX_WORKERS,
+        quoting=csv.QUOTE_ALL,
+        index=False,
+    )
     datasets = datasets.map(
         sentence_segmentation, batched=True, remove_columns="title", num_proc=6
+    )
+    datasets["train"].to_csv(
+        f"{DATA_DIR}/wikipedia/all_sentences.csv",
+        num_proc=MAX_WORKERS,
+        quoting=csv.QUOTE_ALL,
+        index=False,
     )
     datasets = datasets["train"].train_test_split(shuffle=True, keep_in_memory=False)
     dataset_eval_test = datasets["test"].train_test_split(
@@ -78,7 +119,7 @@ def load_datasets():
     datasets = get_wikipedia_dataset(dataset_name, dataset_language, dataset_date)
     metadata = {
         "name": dataset_name,
-        "languange": dataset_language,
+        "language": dataset_language,
         "date": dataset_date,
     }
     for dataset_split_name in datasets:

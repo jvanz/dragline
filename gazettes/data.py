@@ -36,7 +36,6 @@ def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
 class WikipediaDataset(tf.data.Dataset):
     def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=256):
         datafiles = os.listdir(data_dir)
-        datafiles.sort()
         datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
         dataset = tf.data.Dataset.from_tensor_slices(datafiles)
