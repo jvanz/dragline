@@ -15,6 +15,7 @@ BATCH_SIZE ?= 32
 DATASET_SIZE ?= $(shell expr `cat $(DATA_FILE) | wc -l` - 1)
 DATA_DIR ?= "data"
 DATA_FILE ?= "$(DATA_DIR)/wikipedia_20220220_pt.csv"
+EPOCHS ?= 100
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
 MODEL_NAME ?= "text_autoencoder"
 MODEL_PATH ?= "models/$(MODEL_NAME)"
@@ -24,8 +25,10 @@ VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
 WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
 
+
 python_script = PYTHONPATH=$(PWD) \
 	BATCH_SIZE=$(BATCH_SIZE) \
+	EPOCHS=$(EPOCHS) \
 	MODEL_NAME=$(MODEL_NAME) \
 	MODEL_PATH=$(MODEL_PATH) \
 	TF_CPP_MIN_LOG_LEVEL=2 \
