@@ -33,6 +33,7 @@ def get_checkpoint_dir(model):
 
 
 def create_model():
+    logging.info("Creating model...")
     model = tf.keras.Sequential(
         [
             tf.keras.layers.Embedding(
@@ -95,29 +96,12 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     )
 
     model.fit(
-        train_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        ),
-        validation_data=validation_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        ),
+        train_dataset,
+        validation_data=validation_dataset,
         epochs=EPOCHS,
         callbacks=[model_checkpoint_callback, early_stop_callback],
     )
-    results = model.evaluate(
-        test_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
+    results = model.evaluate(test_dataset, return_dict=True,)
     print()
     print(f"Model evaluation: {results}")
     print()
@@ -133,6 +117,7 @@ def get_logits(predictions):
 
 
 def load_datasets(partial_load: float = 1.0):
+    logging.info("Loading datasets...")
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
     train_size = int(metadata["train"]["length"] * partial_load)
     logging.info(f"train_size = {train_size}")
@@ -147,7 +132,7 @@ def load_datasets(partial_load: float = 1.0):
         max_text_length=MAX_TEXT_LENGTH,
         vocabulary=VOCAB_FILE,
         vocabulary_size=VOCAB_SIZE,
-    ).take(train_size)
+    ).take(int(train_size / BATCH_SIZE))
     eval_dataset = TextAutoencoderWikipediaDataset(
         f"{WIKIPEDIA_DATA_DIR}/evaluation",
         parallel_file_read=NUM_PARALLEL_CALLS,
@@ -155,7 +140,7 @@ def load_datasets(partial_load: float = 1.0):
         max_text_length=MAX_TEXT_LENGTH,
         vocabulary=VOCAB_FILE,
         vocabulary_size=VOCAB_SIZE,
-    ).take(evaluation_size)
+    ).take(int(evaluation_size / BATCH_SIZE))
     test_dataset = TextAutoencoderWikipediaDataset(
         f"{WIKIPEDIA_DATA_DIR}/test",
         parallel_file_read=NUM_PARALLEL_CALLS,
@@ -163,7 +148,8 @@ def load_datasets(partial_load: float = 1.0):
         max_text_length=MAX_TEXT_LENGTH,
         vocabulary=VOCAB_FILE,
         vocabulary_size=VOCAB_SIZE,
-    ).take(test_size)
+    ).take(int(test_size / BATCH_SIZE))
+    logging.info("Datasets loaded.")
     return train_dataset, eval_dataset, test_dataset
 
 
@@ -187,9 +173,6 @@ def main():
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
     train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
-    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
-    logging.info(metadata)
-    logging.info(list(train_dataset.take(1)))
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
@@ -197,16 +180,9 @@ def main():
     logging.info("Test dataset:")
     logging.info(list(test_dataset.take(1)))
 
-    predictions = model.predict(
-        test_dataset.batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
-    logging.info(predictions)
-    logging.info("-----------------------")
+    predictions = model.predict(test_dataset)
+    logging.debug(predictions)
+    logging.debug("-----------------------")
     predictions = get_logits(predictions)
     logging.info(predictions)
 
