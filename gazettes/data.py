@@ -34,7 +34,7 @@ def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
 
 
 class WikipediaDataset(tf.data.Dataset):
-    def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=256):
+    def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=32):
         datafiles = os.listdir(data_dir)
         datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
@@ -51,7 +51,7 @@ class WikipediaDataset(tf.data.Dataset):
             .map(decode_fn)
             .cache(get_cache_dir(data_dir, f"cache_load_data"))
         )
-        return dataset.unbatch()
+        return dataset
 
 
 class TextAutoencoderWikipediaDataset(tf.data.Dataset):
@@ -59,13 +59,13 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
         cls,
         data_dir: str,
         parallel_file_read: int = 4,
-        batch_size: int = 256,
+        batch_size: int = 32,
         max_text_length: int = 64,
         vocabulary: str = None,
         vocabulary_size: int = 0,
         num_parallel_calls: int = tf.data.AUTOTUNE,
     ):
-        dataset = WikipediaDataset(data_dir)
+        dataset = WikipediaDataset(data_dir, batch_size=batch_size)
 
         vectorize_layer = tf.keras.layers.TextVectorization(
             output_mode="int",
@@ -80,18 +80,12 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
             vectorized_target = tf.one_hot(vectorize_layer(text), vocabulary_size)
             return (vectorized_text, vectorized_target)
 
-        dataset = (
-            dataset.batch(batch_size)
-            .map(
-                preprocess_text,
-                num_parallel_calls=num_parallel_calls,
-                deterministic=False,
-            )
-            .cache(get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),)
-        )
+        dataset = dataset.map(
+            preprocess_text, num_parallel_calls=num_parallel_calls, deterministic=False,
+        ).cache(get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),)
 
         dataset.vectorize_layer = vectorize_layer
-        return dataset.unbatch()
+        return dataset
 
 
 def load_bert_tokenizer(model_checkpoint: str, vocab_file: str):
