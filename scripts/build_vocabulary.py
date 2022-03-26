@@ -7,14 +7,16 @@ from gazettes.data import WikipediaDataset
 
 WIKIPEDIA_DATA_DIR = os.environ["WIKIPEDIA_DATA_DIR"]
 VOCAB_FILE = os.environ["VOCAB_FILE"]
-VOCAB_SIZE = int(os.environ["VOCAB_SIZE"])
+VOCAB_SIZE = None
+if "VOCAB_SIZE" in os.environ and len(os.environ["VOCAB_SIZE"]) > 0:
+    VOCAB_SIZE = int(os.environ["VOCAB_SIZE"])
 
 
 def main():
     logging.basicConfig(level=logging.INFO)
-    logging.info(WIKIPEDIA_DATA_DIR)
-    logging.info(VOCAB_FILE)
-    logging.info(VOCAB_SIZE)
+    logging.info(f"WIKIPEDIA_DATA_DIR: {WIKIPEDIA_DATA_DIR}")
+    logging.info(f"VOCAB_FILE: {VOCAB_FILE}")
+    logging.info(f"VOCAB_SIZE: {VOCAB_SIZE}")
 
     dataset = WikipediaDataset(f"{WIKIPEDIA_DATA_DIR}/train")
 
