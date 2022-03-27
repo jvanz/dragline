@@ -127,7 +127,7 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                 tokenizer_output["input_ids"],
             )
 
-        def tf_preprocess_text(text):
+        def tf_python_preprocess_text(text):
             preprocessed_text = tf.py_function(
                 preprocess_text,
                 [text],
@@ -150,12 +150,31 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                 tf.reshape(tensor, [max_text_length,]) for tensor in preprocessed_text
             ]
 
+        def tf_preprocess_text(batch):
+            return tf.map_fn(
+                fn=tf_python_preprocess_text,
+                elems=batch,
+                fn_output_signature=[
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="input_ids"
+                    ),
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="token_type_ids",
+                    ),
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
+                    ),
+                    tf.TensorSpec(
+                        shape=(max_text_length,), dtype=tf.int32, name="target"
+                    ),
+                ],
+            )
+
         dataset = dataset.map(
             tf_preprocess_text,
             num_parallel_calls=num_parallel_calls,
             deterministic=False,
         ).cache(get_cache_dir(data_dir, "transformer_preprocessing"),)
-        logging.info(list(dataset.take(1)))
 
         def organize_targets(input_ids, token_type_ids, attention_mask, target):
             return (
