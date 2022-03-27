@@ -118,7 +118,7 @@ train-autoencoder:
 
 
 .PHONY: train-transformer-autoencoder
-train-transformer-autoencoder:
+train-transformer-autoencoder: MODEL_NAME="text_transformer_autoencoder"
 train-transformer-autoencoder:
 	$(call python_script, scripts/text_autoencoder_transformer.py)
 
