@@ -11,7 +11,7 @@ import numpy as np
 from gazettes.data import TextBertAutoencoderWikipediaDataset, load_wikipedia_metadata
 
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
-WIKIPEDIA_DATASET_SIZE = int(os.environ.get("WIKIPEDIA_DATASET_SIZE", 16450980))
+WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
 MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
 VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
@@ -84,7 +84,8 @@ def create_model():
     return model
 
 
-def load_data(partial_load: float = 1.0):
+def load_datasets(partial_load: float = 1.0):
+    logging.info("Loading datasets...")
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
     train_size = int(metadata["train"]["length"] * partial_load)
     logging.info(f"train_size = {train_size}")
@@ -92,59 +93,31 @@ def load_data(partial_load: float = 1.0):
     logging.info(f"evaluation_size = {evaluation_size}")
     test_size = int(metadata["test"]["length"] * partial_load)
     logging.info(f"test_size = {test_size}")
-    train_dataset = (
-        TextBertAutoencoderWikipediaDataset(
-            f"{WIKIPEDIA_DATA_DIR}/train",
-            parallel_file_read=NUM_PARALLEL_CALLS,
-            batch_size=BATCH_SIZE,
-            max_text_length=MAX_TEXT_LENGTH,
-            vocabulary=VOCAB_FILE,
-            vocabulary_size=VOCAB_SIZE,
-        )
-        .take(train_size)
-        .batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
-
-    eval_dataset = (
-        TextBertAutoencoderWikipediaDataset(
-            f"{WIKIPEDIA_DATA_DIR}/evaluation",
-            parallel_file_read=NUM_PARALLEL_CALLS,
-            batch_size=BATCH_SIZE,
-            max_text_length=MAX_TEXT_LENGTH,
-            vocabulary=VOCAB_FILE,
-            vocabulary_size=VOCAB_SIZE,
-        )
-        .take(evaluation_size)
-        .batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
-
-    test_dataset = (
-        TextBertAutoencoderWikipediaDataset(
-            f"{WIKIPEDIA_DATA_DIR}/test",
-            parallel_file_read=NUM_PARALLEL_CALLS,
-            batch_size=BATCH_SIZE,
-            max_text_length=MAX_TEXT_LENGTH,
-            vocabulary=VOCAB_FILE,
-            vocabulary_size=VOCAB_SIZE,
-        )
-        .take(test_size)
-        .batch(
-            BATCH_SIZE,
-            drop_remainder=True,
-            num_parallel_calls=NUM_PARALLEL_CALLS,
-            deterministic=False,
-        )
-    )
+    train_dataset = TextBertAutoencoderWikipediaDataset(
+        f"{WIKIPEDIA_DATA_DIR}/train",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+        max_text_length=MAX_TEXT_LENGTH,
+        vocabulary=VOCAB_FILE,
+        vocabulary_size=VOCAB_SIZE,
+    ).take(int(train_size / BATCH_SIZE))
+    eval_dataset = TextBertAutoencoderWikipediaDataset(
+        f"{WIKIPEDIA_DATA_DIR}/evaluation",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+        max_text_length=MAX_TEXT_LENGTH,
+        vocabulary=VOCAB_FILE,
+        vocabulary_size=VOCAB_SIZE,
+    ).take(int(evaluation_size / BATCH_SIZE))
+    test_dataset = TextBertAutoencoderWikipediaDataset(
+        f"{WIKIPEDIA_DATA_DIR}/test",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+        max_text_length=MAX_TEXT_LENGTH,
+        vocabulary=VOCAB_FILE,
+        vocabulary_size=VOCAB_SIZE,
+    ).take(int(test_size / BATCH_SIZE))
+    logging.info("Datasets loaded.")
     return train_dataset, eval_dataset, test_dataset
 
 
@@ -203,8 +176,9 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    train_dataset, eval_dataset, test_dataset = load_data(0.1)
+    train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
     logging.info(list(train_dataset.take(1)))
+    logging.info(train_dataset.element_spec)
     model = create_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
 
