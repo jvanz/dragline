@@ -25,6 +25,9 @@ DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
 MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
 MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
+DROPOUT = 0.2
+PATIENCE = 10
+
 
 def get_checkpoint_dir(model):
     checkpoint_dir = f"{os.getcwd()}/checkpoints/{MODEL_NAME}"
@@ -42,22 +45,12 @@ def create_model():
                 name="embbedding",
                 input_length=MAX_TEXT_LENGTH,
             ),
-            tf.keras.layers.Dense(
-                DIMENSOES_ESPACO_LATENTE, activation="relu", name="encoder1",
-            ),
-            tf.keras.layers.Bidirectional(
-                tf.keras.layers.GRU(
-                    units=DIMENSOES_ESPACO_LATENTE, return_sequences=False,
-                ),
-                name="encoder2",
+            tf.keras.layers.GRU(
+                units=DIMENSOES_ESPACO_LATENTE, return_sequences=False, dropout=DROPOUT,
             ),
             tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="decoder0"),
-            tf.keras.layers.Dropout(0.2, name="decoder1"),
-            tf.keras.layers.Bidirectional(
-                tf.keras.layers.GRU(
-                    units=DIMENSOES_ESPACO_LATENTE, return_sequences=True,
-                ),
-                name="decoder2",
+            tf.keras.layers.GRU(
+                units=DIMENSOES_ESPACO_LATENTE, return_sequences=True, dropout=DROPOUT,
             ),
             tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder3"),
         ],
@@ -92,7 +85,11 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_best_only=False,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
-        monitor="loss", min_delta=1e-2, patience=3
+        monitor="val_loss",
+        mode="min",
+        min_delta=1e-2,
+        patience=PATIENCE,
+        restore_best_weights=True,
     )
 
     model.fit(
@@ -165,6 +162,7 @@ def main():
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
     train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
+    logging.info(train_dataset.take(1).take(1).element_spec)
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
