@@ -149,14 +149,6 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     model.save(f"models/{MODEL_NAME}", overwrite=True)
 
 
-def get_logits(predictions):
-    sentences = []
-    for sentence in predictions:
-        sentence = np.argmax(sentence, axis=1)
-        sentences.append(sentence)
-    return np.asarray(sentences)
-
-
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.INFO)
@@ -182,14 +174,6 @@ def main():
     model = create_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
 
-    predictions = model.predict(test_dataset)
-    logging.info(predictions[0])
-    logging.info(predictions.shape)
-    predictions = get_logits(predictions)
-    logging.info(predictions[0])
-    string_lookup = tf.keras.layers.StringLookup(vocabulary=VOCAB_FILE, invert=True)
-    predicted_sentences = string_lookup(predictions)
-    logging.info(predicted_sentences)
 
 
 if __name__ == "__main__":
