@@ -108,14 +108,6 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     save_model(model, MODEL_PATH)
 
 
-def get_logits(predictions):
-    sentences = []
-    for sentence in predictions:
-        sentence = np.argmax(sentence, axis=1)
-        sentences.append(sentence)
-    return np.asarray(sentences)
-
-
 def load_datasets(partial_load: float = 1.0):
     logging.info("Loading datasets...")
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
@@ -176,15 +168,6 @@ def main():
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
-    test_dataset = test_dataset.map(lambda inputt, target: inputt)
-    logging.info("Test dataset:")
-    logging.info(list(test_dataset.take(1)))
-
-    predictions = model.predict(test_dataset)
-    logging.debug(predictions)
-    logging.debug("-----------------------")
-    predictions = get_logits(predictions)
-    logging.info(predictions)
 
 
 if __name__ == "__main__":
