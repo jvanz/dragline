@@ -46,9 +46,7 @@ class WikipediaDataset(tf.data.Dataset):
             deterministic=False,
         )
         dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-        dataset = (
-            dataset.batch(batch_size).map(decode_fn)
-        )
+        dataset = dataset.batch(batch_size).map(decode_fn)
         if has_cache_enable():
             dataset.cache(get_cache_dir(data_dir, f"cache_load_data"))
         return dataset
@@ -84,7 +82,9 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
             preprocess_text, num_parallel_calls=num_parallel_calls, deterministic=False,
         )
         if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),)
+            dataset.cache(
+                get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),
+            )
 
         dataset.vectorize_layer = vectorize_layer
         return dataset
@@ -197,7 +197,7 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
         logging.info(dataset.element_spec)
         dataset = dataset.map(onehot_target)
         if has_cache_enable():
-            dataset.cache( get_cache_dir(data_dir, "transformer_one_hot_target"))
+            dataset.cache(get_cache_dir(data_dir, "transformer_one_hot_target"))
         return dataset
 
 
@@ -323,6 +323,7 @@ def sample_gazettes_texts(force_clean=False):
         clean_gazette_text_if_necessary(gazette, force_clean=force_clean)
         text = load_gazette_text(gazette)
         yield gazette, text
+
 
 def has_cache_enable():
     return False
