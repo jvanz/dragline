@@ -29,6 +29,43 @@ DROPOUT = 0.2
 PATIENCE = 10
 
 
+class TextAutoEncoder(tf.keras.Model):
+    def __init__(self, dimensoes_espaco_latente, max_text_length, vocab_size, dropout):
+        super(TextAutoEncoder, self).__init__()
+        self.encoder = tf.keras.Sequential(
+            [
+                tf.keras.layers.Embedding(
+                    input_dim=vocab_size,
+                    output_dim=16,
+                    name="embbedding",
+                    input_length=max_text_length,
+                ),
+                tf.keras.layers.GRU(
+                    units=dimensoes_espaco_latente,
+                    return_sequences=False,
+                    dropout=dropout,
+                ),
+            ]
+        )
+        self.decoder = tf.keras.Sequential(
+            [
+                tf.keras.layers.RepeatVector(max_text_length, name="decoder0"),
+                tf.keras.layers.GRU(
+                    units=dimensoes_espaco_latente,
+                    return_sequences=True,
+                    dropout=dropout,
+                ),
+                tf.keras.layers.Dense(
+                    vocab_size, activation="softmax", name="decoder3"
+                ),
+            ]
+        )
+
+    def call(self, inputt):
+        encoded = self.encoder(inputt)
+        return self.decoder(encoded)
+
+
 def get_checkpoint_dir(model):
     checkpoint_dir = f"{os.getcwd()}/checkpoints/{MODEL_NAME}"
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -37,24 +74,8 @@ def get_checkpoint_dir(model):
 
 def create_model():
     logging.info("Creating model...")
-    model = tf.keras.Sequential(
-        [
-            tf.keras.layers.Embedding(
-                input_dim=VOCAB_SIZE,
-                output_dim=16,
-                name="embbedding",
-                input_length=MAX_TEXT_LENGTH,
-            ),
-            tf.keras.layers.GRU(
-                units=DIMENSOES_ESPACO_LATENTE, return_sequences=False, dropout=DROPOUT,
-            ),
-            tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="decoder0"),
-            tf.keras.layers.GRU(
-                units=DIMENSOES_ESPACO_LATENTE, return_sequences=True, dropout=DROPOUT,
-            ),
-            tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder3"),
-        ],
-        name=MODEL_NAME,
+    model = TextAutoEncoder(
+        DIMENSOES_ESPACO_LATENTE, MAX_TEXT_LENGTH, VOCAB_SIZE, DROPOUT
     )
     model.compile(
         loss=tf.keras.losses.CategoricalCrossentropy(),
@@ -67,7 +88,6 @@ def create_model():
 def create_or_load_model():
     # TODO - load model from checkpoint
     model = create_model()
-    model.summary()
     return model
 
 
