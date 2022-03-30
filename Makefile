@@ -12,14 +12,11 @@ APACHE_TIKA_IMAGE_TAG ?= latest
 APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
 BATCH_SIZE ?= 32
-DATASET_SIZE ?= $(shell expr `cat $(DATA_FILE) | wc -l` - 1)
 DATA_DIR ?= "data"
-DATA_FILE ?= "$(DATA_DIR)/wikipedia_20220220_pt.csv"
 EPOCHS ?= 100
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
 MODEL_NAME ?= "text_autoencoder"
 MODEL_PATH ?= "models/$(MODEL_NAME)"
-SENTENCES_FILE ?= "$(DATA_FILE)/sentences_to_predict"
 VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
 VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
@@ -135,16 +132,15 @@ download_bertimbau_tensorflow_checkpoint:
 
 .PHONY: show_data_info
 show_data_info:
-	@echo Data file: $(DATA_FILE)
-	@echo Data file size: $(DATASET_SIZE)
 	@echo Vocabulary file: $(VOCAB_FILE)
 	@echo Vocabulary file size: $(VOCAB_SIZE)
 	@echo Wikipedia data dir: $(WIKIPEDIA_DATA_DIR)
 	@echo Wikipedia dataset size: $(WIKIPEDIA_DATASET_SIZE)
 
-.PHONY: predict
-predict:
-	$(call python_script, scripts/predict_text.py)
+.PHONY: predict-autoencoder
+predict-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
+predict-autoencoder:
+	PYTHONPATH=$(PWD) python scripts/predict_text.py -m models/text_autoencoder -d autoencoder  --dataset-dir $(WIKIPEDIA_DATA_DIR) --vocab-file $(VOCAB_FILE) --vocab-size $(VOCAB_SIZE) --batch-size $(BATCH_SIZE)
 
 .PHONY: build-vocab
 build-vocab: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
