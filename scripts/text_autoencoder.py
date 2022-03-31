@@ -27,39 +27,55 @@ MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
 DROPOUT = 0.2
 PATIENCE = 10
+HIDDEN_LAYERS = 2
 
 
 class TextAutoEncoder(tf.keras.Model):
     def __init__(self, dimensoes_espaco_latente, max_text_length, vocab_size, dropout):
         super(TextAutoEncoder, self).__init__()
-        self.encoder = tf.keras.Sequential(
-            [
-                tf.keras.layers.Embedding(
-                    input_dim=vocab_size,
-                    output_dim=16,
-                    name="embbedding",
-                    input_length=max_text_length,
-                ),
-                tf.keras.layers.GRU(
-                    units=dimensoes_espaco_latente,
-                    return_sequences=False,
-                    dropout=dropout,
-                ),
-            ]
+        self.encoder = tf.keras.Sequential()
+        self.encoder.add(
+            tf.keras.layers.Embedding(
+                input_dim=vocab_size, output_dim=16, input_length=max_text_length,
+            )
         )
-        self.decoder = tf.keras.Sequential(
-            [
-                tf.keras.layers.RepeatVector(max_text_length, name="decoder0"),
-                tf.keras.layers.GRU(
-                    units=dimensoes_espaco_latente,
-                    return_sequences=True,
-                    dropout=dropout,
-                ),
-                tf.keras.layers.Dense(
-                    vocab_size, activation="softmax", name="decoder3"
-                ),
-            ]
+        for _ in range(HIDDEN_LAYERS - 1):
+            self.encoder.add(
+                tf.keras.layers.Bidirectional(
+                    tf.keras.layers.GRU(
+                        units=dimensoes_espaco_latente,
+                        return_sequences=True,
+                        dropout=dropout,
+                    )
+                )
+            )
+        self.encoder.add(
+            tf.keras.layers.GRU(
+                units=dimensoes_espaco_latente, return_sequences=False, dropout=dropout,
+            )
         )
+
+        self.decoder = tf.keras.Sequential()
+        self.decoder.add(tf.keras.layers.RepeatVector(max_text_length))
+        for _ in range(HIDDEN_LAYERS - 1):
+            self.decoder.add(
+                tf.keras.layers.Bidirectional(
+                    tf.keras.layers.GRU(
+                        units=dimensoes_espaco_latente,
+                        return_sequences=True,
+                        dropout=dropout,
+                    )
+                )
+            )
+        self.decoder.add(
+            tf.keras.layers.GRU(
+                units=vocab_size,
+                return_sequences=True,
+                dropout=dropout,
+                activation="softmax",
+            )
+        )
+        # self.decoder.add(tf.keras.layers.Dense(vocab_size, activation="softmax"))
 
     def call(self, inputt):
         encoded = self.encoder(inputt)
