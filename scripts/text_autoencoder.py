@@ -26,60 +26,67 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
 MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
 DROPOUT = 0.2
-PATIENCE = 10
+PATIENCE = 5
 HIDDEN_LAYERS = 2
+LSTM_ACTIVATION = "relu"
 
 
 class TextAutoEncoder(tf.keras.Model):
     def __init__(self, dimensoes_espaco_latente, max_text_length, vocab_size, dropout):
         super(TextAutoEncoder, self).__init__()
-        self.encoder = tf.keras.Sequential()
-        self.encoder.add(
-            tf.keras.layers.Embedding(
-                input_dim=vocab_size, output_dim=16, input_length=max_text_length,
-            )
-        )
-        for _ in range(HIDDEN_LAYERS - 1):
+
+        self.encoder = tf.keras.Sequential(name="encoder")
+        self.encoder.add(tf.keras.layers.Input(shape=(max_text_length,)))
+        self.encoder.add(tf.keras.layers.Reshape((max_text_length, 1)))
+        # self.encoder.add(
+        #     tf.keras.layers.Embedding(
+        #         input_dim=vocab_size, output_dim=16, input_length=max_text_length,
+        #     )
+        # )
+        for _ in range(HIDDEN_LAYERS):
             self.encoder.add(
                 tf.keras.layers.Bidirectional(
-                    tf.keras.layers.GRU(
+                    tf.keras.layers.LSTM(
                         units=dimensoes_espaco_latente,
                         return_sequences=True,
                         dropout=dropout,
-                    )
+                        recurrent_dropout=dropout,
+                        activation=LSTM_ACTIVATION,
+                    ),
+                    merge_mode="sum",
                 )
             )
         self.encoder.add(
-            tf.keras.layers.GRU(
-                units=dimensoes_espaco_latente, return_sequences=False, dropout=dropout,
-            )
+            tf.keras.layers.LSTM(
+                units=dimensoes_espaco_latente,
+                return_sequences=False,
+                name="encoder_output",
+            ),
         )
 
-        self.decoder = tf.keras.Sequential()
+        self.decoder = tf.keras.Sequential(name="decoder")
+        self.decoder.add(tf.keras.layers.Input(shape=(dimensoes_espaco_latente,)))
         self.decoder.add(tf.keras.layers.RepeatVector(max_text_length))
-        for _ in range(HIDDEN_LAYERS - 1):
+        for _ in range(HIDDEN_LAYERS):
             self.decoder.add(
                 tf.keras.layers.Bidirectional(
-                    tf.keras.layers.GRU(
+                    tf.keras.layers.LSTM(
                         units=dimensoes_espaco_latente,
                         return_sequences=True,
                         dropout=dropout,
-                    )
+                        recurrent_dropout=dropout,
+                        activation=LSTM_ACTIVATION,
+                    ),
+                    merge_mode="sum",
                 )
             )
-        self.decoder.add(
-            tf.keras.layers.GRU(
-                units=vocab_size,
-                return_sequences=True,
-                dropout=dropout,
-                activation="softmax",
-            )
-        )
-        # self.decoder.add(tf.keras.layers.Dense(vocab_size, activation="softmax"))
+
+        self.decoder.add(tf.keras.layers.Dense(1))
+        self.decoder.add(tf.keras.layers.Reshape((max_text_length,)))
 
     def call(self, inputt):
-        encoded = self.encoder(inputt)
-        return self.decoder(encoded)
+        outputs = self.decoder(self.encoder(inputt))
+        return outputs
 
 
 def get_checkpoint_dir(model):
@@ -90,13 +97,60 @@ def get_checkpoint_dir(model):
 
 def create_model():
     logging.info("Creating model...")
-    model = TextAutoEncoder(
-        DIMENSOES_ESPACO_LATENTE, MAX_TEXT_LENGTH, VOCAB_SIZE, DROPOUT
+    # model = TextAutoEncoder(
+    #     DIMENSOES_ESPACO_LATENTE, MAX_TEXT_LENGTH, VOCAB_SIZE, DROPOUT
+    # )
+
+    dimensoes_espaco_latente = DIMENSOES_ESPACO_LATENTE
+    max_text_length = MAX_TEXT_LENGTH
+    vocab_size = VOCAB_SIZE
+    dropout = DROPOUT
+
+    model = tf.keras.Sequential(name="autoencoder")
+    model.add(tf.keras.layers.Input(shape=(max_text_length,)))
+    model.add(tf.keras.layers.Reshape((max_text_length, 1)))
+    for _ in range(HIDDEN_LAYERS):
+        model.add(
+            tf.keras.layers.Bidirectional(
+                tf.keras.layers.LSTM(
+                    units=dimensoes_espaco_latente,
+                    return_sequences=True,
+                    dropout=dropout,
+                    recurrent_dropout=dropout,
+                    activation=LSTM_ACTIVATION,
+                ),
+                merge_mode="sum",
+            )
+        )
+    model.add(
+        tf.keras.layers.LSTM(
+            units=dimensoes_espaco_latente,
+            return_sequences=False,
+            name="encoder_output",
+        ),
     )
+
+    model.add(tf.keras.layers.RepeatVector(max_text_length))
+    for _ in range(HIDDEN_LAYERS):
+        model.add(
+            tf.keras.layers.Bidirectional(
+                tf.keras.layers.LSTM(
+                    units=dimensoes_espaco_latente,
+                    return_sequences=True,
+                    dropout=dropout,
+                    recurrent_dropout=dropout,
+                    activation=LSTM_ACTIVATION,
+                ),
+                merge_mode="sum",
+            )
+        )
+
+    model.add(tf.keras.layers.Dense(1))
+    model.add(tf.keras.layers.Reshape((max_text_length,)))
+
     model.compile(
-        loss=tf.keras.losses.CategoricalCrossentropy(),
+        loss=tf.keras.losses.MeanSquaredError(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-        metrics=["categorical_crossentropy"],
     )
     return model
 
@@ -104,10 +158,14 @@ def create_model():
 def create_or_load_model():
     # TODO - load model from checkpoint
     model = create_model()
+    model.summary()
     return model
 
 
 def save_model(model, model_path: str):
+    tf.keras.utils.plot_model(
+        model, show_shapes=True, to_file=f"{model_path}/model_plot.png"
+    )
     model.save(model_path, overwrite=True)
 
 
@@ -121,18 +179,19 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_best_only=False,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
-        monitor="val_loss",
+        monitor="loss",
         mode="min",
         min_delta=1e-2,
         patience=PATIENCE,
         restore_best_weights=True,
     )
+    tb_callback = tf.keras.callbacks.TensorBoard("./logs", update_freq=1)
 
     model.fit(
         train_dataset,
         validation_data=validation_dataset,
         epochs=EPOCHS,
-        callbacks=[model_checkpoint_callback, early_stop_callback],
+        callbacks=[model_checkpoint_callback, early_stop_callback, tb_callback],
     )
     results = model.evaluate(test_dataset, return_dict=True,)
     print()
@@ -180,7 +239,7 @@ def load_datasets(partial_load: float = 1.0):
 
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
 
     logging.info(f"WIKIPEDIA_DATA_DIR = {WIKIPEDIA_DATA_DIR}")
     logging.info(f"WIKIPEDIA_DATASET_SIZE = {WIKIPEDIA_DATASET_SIZE}")
@@ -198,10 +257,15 @@ def main():
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
     train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
+    logging.debug(list(train_dataset.take(1)))
     logging.info(train_dataset.take(1).take(1).element_spec)
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
+    predictions = model.predict(eval_dataset.take(1))
+    logging.info(eval_dataset.take(1))
+    logging.info(predictions[0])
+    logging.info(predictions.shape)
 
 
 if __name__ == "__main__":

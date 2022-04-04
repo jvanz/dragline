@@ -75,7 +75,9 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
 
         def preprocess_text(text):
             vectorized_text = vectorize_layer(text)
-            vectorized_target = tf.one_hot(vectorize_layer(text), vocabulary_size)
+            vectorized_target = vectorize_layer(text)
+            # vectorized_target = tf.reshape( vectorize_layer(text), [batch_size, max_text_length])
+            # vectorized_target = tf.one_hot(vectorize_layer(text), vocabulary_size)
             return (vectorized_text, vectorized_target)
 
         dataset = dataset.map(
@@ -183,19 +185,17 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
         def organize_targets(input_ids, token_type_ids, attention_mask, target):
             return (
                 (input_ids, token_type_ids, attention_mask),
-                target,
-                # tf.one_hot(target, vocabulary_size),
-            )
-
-        def onehot_target(inputs, target):
-            return (
-                inputs,
                 tf.one_hot(target, vocabulary_size),
             )
 
+        # def onehot_target(inputs, target):
+        #     return (
+        #         inputs,
+        #         tf.one_hot(target, vocabulary_size),
+        #     )
+
         dataset = dataset.map(organize_targets)
         logging.info(dataset.element_spec)
-        dataset = dataset.map(onehot_target)
         if has_cache_enable():
             dataset.cache(get_cache_dir(data_dir, "transformer_one_hot_target"))
         return dataset

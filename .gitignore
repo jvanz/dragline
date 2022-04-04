@@ -5,3 +5,6 @@ gazettes.csv
 scrapy.log
 notebooks/*.png
 notebooks/*.gif
+logs
+models
+checkpoints
