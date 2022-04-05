@@ -151,6 +151,7 @@ def create_model():
     model.compile(
         loss=tf.keras.losses.MeanSquaredError(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
+        metrics=[tf.keras.metrics.MeanSquaredError()],
     )
     return model
 
