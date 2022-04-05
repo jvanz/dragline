@@ -25,9 +25,10 @@ DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
 MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
 MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
-DROPOUT = 0.2
-PATIENCE = 5
-HIDDEN_LAYERS = 2
+DROPOUT = float(os.environ.get("DROPOUT", 0.2))
+PATIENCE = int(os.environ.get("PATIENCE", 50))
+HIDDEN_LAYERS = int(os.environ.get("HIDDEN_LAYERS", 1))
+BIDIRECTIONAL = bool(os.environ.get("BIDIRECTIONAL_RNN", 1))
 LSTM_ACTIVATION = "relu"
 
 
@@ -97,9 +98,6 @@ def get_checkpoint_dir(model):
 
 def create_model():
     logging.info("Creating model...")
-    # model = TextAutoEncoder(
-    #     DIMENSOES_ESPACO_LATENTE, MAX_TEXT_LENGTH, VOCAB_SIZE, DROPOUT
-    # )
 
     dimensoes_espaco_latente = DIMENSOES_ESPACO_LATENTE
     max_text_length = MAX_TEXT_LENGTH
@@ -110,8 +108,8 @@ def create_model():
     model.add(tf.keras.layers.Input(shape=(max_text_length,)))
     model.add(tf.keras.layers.Reshape((max_text_length, 1)))
     for _ in range(HIDDEN_LAYERS):
-        model.add(
-            tf.keras.layers.Bidirectional(
+        if BIDIRECTIONAL:
+            layer = tf.keras.layers.Bidirectional(
                 tf.keras.layers.LSTM(
                     units=dimensoes_espaco_latente,
                     return_sequences=True,
@@ -121,7 +119,17 @@ def create_model():
                 ),
                 merge_mode="sum",
             )
-        )
+        else:
+            layer = (
+                tf.keras.layers.LSTM(
+                    units=dimensoes_espaco_latente,
+                    return_sequences=True,
+                    dropout=dropout,
+                    recurrent_dropout=dropout,
+                    activation=LSTM_ACTIVATION,
+                ),
+            )
+        model.add(layer)
     model.add(
         tf.keras.layers.LSTM(
             units=dimensoes_espaco_latente,
@@ -132,8 +140,8 @@ def create_model():
 
     model.add(tf.keras.layers.RepeatVector(max_text_length))
     for _ in range(HIDDEN_LAYERS):
-        model.add(
-            tf.keras.layers.Bidirectional(
+        if BIDIRECTIONAL:
+            layer = tf.keras.layers.Bidirectional(
                 tf.keras.layers.LSTM(
                     units=dimensoes_espaco_latente,
                     return_sequences=True,
@@ -143,7 +151,17 @@ def create_model():
                 ),
                 merge_mode="sum",
             )
-        )
+        else:
+            layer = (
+                tf.keras.layers.LSTM(
+                    units=dimensoes_espaco_latente,
+                    return_sequences=True,
+                    dropout=dropout,
+                    recurrent_dropout=dropout,
+                    activation=LSTM_ACTIVATION,
+                ),
+            )
+        model.add(layer)
 
     model.add(tf.keras.layers.Dense(1))
     model.add(tf.keras.layers.Reshape((max_text_length,)))
