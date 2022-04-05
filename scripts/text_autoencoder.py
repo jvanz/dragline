@@ -149,9 +149,9 @@ def create_model():
     model.add(tf.keras.layers.Reshape((max_text_length,)))
 
     model.compile(
-        loss=tf.keras.losses.MeanSquaredError(),
+        loss=tf.keras.losses.MeanSquaredLogarithmicError(),
         optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-        metrics=[tf.keras.metrics.MeanSquaredError()],
+        metrics=[tf.keras.metrics.MeanSquaredLogarithmicError()],
     )
     return model
 
