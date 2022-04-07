@@ -165,3 +165,9 @@ clean-cache:
 .PHONY: clean-wikipedia
 clean-wikipedia:
 	rm -rf $(WIKIPEDIA_DATA_DIR)
+
+.PHONY: download-word-embeddings
+download-word-embeddings:
+	mkdir -p $(DATA_DIR)/embeddings
+	curl -o $(DATA_DIR)/embeddings/glove_s50.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s50.zip
+	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s50.zip

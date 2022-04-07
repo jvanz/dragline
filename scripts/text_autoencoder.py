@@ -5,9 +5,12 @@ import csv
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
+from gensim.models import KeyedVectors
 
 from gazettes.data import (
     TextAutoencoderWikipediaDataset,
+    WikipediaDataset,
+    TextAutoencoderEmbeddingWikipediaDataset,
     load_wikipedia_metadata,
 )
 
@@ -26,68 +29,14 @@ MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
 MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
 DROPOUT = float(os.environ.get("DROPOUT", 0.2))
-PATIENCE = int(os.environ.get("PATIENCE", 50))
+PATIENCE = int(os.environ.get("PATIENCE", 10))
 HIDDEN_LAYERS = int(os.environ.get("HIDDEN_LAYERS", 1))
-BIDIRECTIONAL = bool(os.environ.get("BIDIRECTIONAL_RNN", 1))
-LSTM_ACTIVATION = "relu"
+BIDIRECTIONAL = bool(os.environ.get("BIDIRECTIONAL", "1") == "1")
+EMBEDDING_DIM = 50
 
-
-class TextAutoEncoder(tf.keras.Model):
-    def __init__(self, dimensoes_espaco_latente, max_text_length, vocab_size, dropout):
-        super(TextAutoEncoder, self).__init__()
-
-        self.encoder = tf.keras.Sequential(name="encoder")
-        self.encoder.add(tf.keras.layers.Input(shape=(max_text_length,)))
-        self.encoder.add(tf.keras.layers.Reshape((max_text_length, 1)))
-        # self.encoder.add(
-        #     tf.keras.layers.Embedding(
-        #         input_dim=vocab_size, output_dim=16, input_length=max_text_length,
-        #     )
-        # )
-        for _ in range(HIDDEN_LAYERS):
-            self.encoder.add(
-                tf.keras.layers.Bidirectional(
-                    tf.keras.layers.LSTM(
-                        units=dimensoes_espaco_latente,
-                        return_sequences=True,
-                        dropout=dropout,
-                        recurrent_dropout=dropout,
-                        activation=LSTM_ACTIVATION,
-                    ),
-                    merge_mode="sum",
-                )
-            )
-        self.encoder.add(
-            tf.keras.layers.LSTM(
-                units=dimensoes_espaco_latente,
-                return_sequences=False,
-                name="encoder_output",
-            ),
-        )
-
-        self.decoder = tf.keras.Sequential(name="decoder")
-        self.decoder.add(tf.keras.layers.Input(shape=(dimensoes_espaco_latente,)))
-        self.decoder.add(tf.keras.layers.RepeatVector(max_text_length))
-        for _ in range(HIDDEN_LAYERS):
-            self.decoder.add(
-                tf.keras.layers.Bidirectional(
-                    tf.keras.layers.LSTM(
-                        units=dimensoes_espaco_latente,
-                        return_sequences=True,
-                        dropout=dropout,
-                        recurrent_dropout=dropout,
-                        activation=LSTM_ACTIVATION,
-                    ),
-                    merge_mode="sum",
-                )
-            )
-
-        self.decoder.add(tf.keras.layers.Dense(1))
-        self.decoder.add(tf.keras.layers.Reshape((max_text_length,)))
-
-    def call(self, inputt):
-        outputs = self.decoder(self.encoder(inputt))
-        return outputs
+embeddingmodel = KeyedVectors.load_word2vec_format("data/embeddings/glove_s50.txt")
+embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
+embeddingmodel.add_vector("<UNK>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 
 
 def get_checkpoint_dir(model):
@@ -103,73 +52,33 @@ def create_model():
     max_text_length = MAX_TEXT_LENGTH
     vocab_size = VOCAB_SIZE
     dropout = DROPOUT
+    embeddind_size = 50
 
     model = tf.keras.Sequential(name="autoencoder")
-    model.add(tf.keras.layers.Input(shape=(max_text_length,)))
-    model.add(tf.keras.layers.Reshape((max_text_length, 1)))
-    for _ in range(HIDDEN_LAYERS):
-        if BIDIRECTIONAL:
-            layer = tf.keras.layers.Bidirectional(
-                tf.keras.layers.LSTM(
-                    units=dimensoes_espaco_latente,
-                    return_sequences=True,
-                    dropout=dropout,
-                    recurrent_dropout=dropout,
-                    activation=LSTM_ACTIVATION,
-                ),
-                merge_mode="sum",
-            )
-        else:
-            layer = (
-                tf.keras.layers.LSTM(
-                    units=dimensoes_espaco_latente,
-                    return_sequences=True,
-                    dropout=dropout,
-                    recurrent_dropout=dropout,
-                    activation=LSTM_ACTIVATION,
-                ),
-            )
-        model.add(layer)
     model.add(
-        tf.keras.layers.LSTM(
-            units=dimensoes_espaco_latente,
-            return_sequences=False,
-            name="encoder_output",
-        ),
+        tf.keras.layers.Input(shape=(max_text_length, embeddind_size), name="input")
+    )
+    model.add(
+        tf.keras.layers.Bidirectional(
+            tf.keras.layers.LSTM(units=dimensoes_espaco_latente,),
+            merge_mode="sum",
+            name="encoder",
+        )
     )
 
-    model.add(tf.keras.layers.RepeatVector(max_text_length))
-    for _ in range(HIDDEN_LAYERS):
-        if BIDIRECTIONAL:
-            layer = tf.keras.layers.Bidirectional(
-                tf.keras.layers.LSTM(
-                    units=dimensoes_espaco_latente,
-                    return_sequences=True,
-                    dropout=dropout,
-                    recurrent_dropout=dropout,
-                    activation=LSTM_ACTIVATION,
-                ),
-                merge_mode="sum",
-            )
-        else:
-            layer = (
-                tf.keras.layers.LSTM(
-                    units=dimensoes_espaco_latente,
-                    return_sequences=True,
-                    dropout=dropout,
-                    recurrent_dropout=dropout,
-                    activation=LSTM_ACTIVATION,
-                ),
-            )
-        model.add(layer)
-
-    model.add(tf.keras.layers.Dense(1))
-    model.add(tf.keras.layers.Reshape((max_text_length,)))
+    model.add(tf.keras.layers.RepeatVector(max_text_length, name="repeater"))
+    model.add(
+        tf.keras.layers.Bidirectional(
+            tf.keras.layers.LSTM(units=embeddind_size, return_sequences=True),
+            merge_mode="sum",
+            name="decoder",
+        )
+    )
 
     model.compile(
-        loss=tf.keras.losses.MeanSquaredLogarithmicError(),
-        optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-        metrics=[tf.keras.metrics.MeanSquaredLogarithmicError()],
+        loss=tf.keras.losses.MeanSquaredError(),
+        optimizer=tf.keras.optimizers.Adam(),
+        metrics=[tf.keras.metrics.MeanSquaredError()],
     )
     return model
 
@@ -200,7 +109,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
         monitor="loss",
         mode="min",
-        min_delta=1e-2,
+        # min_delta=1e-2,
         patience=PATIENCE,
         restore_best_weights=True,
     )
@@ -256,6 +165,124 @@ def load_datasets(partial_load: float = 1.0):
     return train_dataset, eval_dataset, test_dataset
 
 
+def gen_word_sequence(data_dir):
+    train_dataset = WikipediaDataset(
+        data_dir.decode("utf-8"),
+        # f"{WIKIPEDIA_DATA_DIR}/train",
+        parallel_file_read=NUM_PARALLEL_CALLS,
+        batch_size=BATCH_SIZE,
+    )
+    for batch in train_dataset.as_numpy_iterator():
+        for sentence in batch:
+            yield tf.keras.preprocessing.text.text_to_word_sequence(
+                sentence.decode("utf-8")
+            )
+
+
+def gen_embedded_dataset(data_dir):
+    for sentence in gen_word_sequence(data_dir):
+        embedding_sentence = []
+        for word in sentence:
+            if word in embeddingmodel:
+                embedding_sentence.append(embeddingmodel.get_vector(word))
+            else:
+                embedding_sentence.append(embeddingmodel.get_vector("<UNK>"))
+        if len(embedding_sentence) > MAX_TEXT_LENGTH:
+            embedding_sentence = embedding_sentence[:MAX_TEXT_LENGTH]
+        if len(embedding_sentence) < MAX_TEXT_LENGTH:
+            for _ in range(MAX_TEXT_LENGTH - len(embedding_sentence)):
+                embedding_sentence.append(embeddingmodel.get_vector("<PAD>"))
+        assert len(embedding_sentence) == MAX_TEXT_LENGTH
+        yield embedding_sentence
+
+
+def convert_embedding_sentence_to_string_sentence(sentence):
+    strsentence = []
+    for emb in sentence:
+        word = embeddingmodel.similar_by_vector(emb, 1)[0][0]
+        strsentence.append(word)
+    return " ".join(strsentence)
+
+
+def add_target(sentence):
+    return (sentence, sentence)
+
+
+def load_embedded_dataset():
+    partial_load = WIKIPEDIA_DATASET_SIZE
+    logging.info("Loading datasets...")
+    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
+    train_size = int(metadata["train"]["length"] * partial_load)
+    logging.info(f"train_size = {train_size}")
+    evaluation_size = int(metadata["evaluation"]["length"] * partial_load)
+    logging.info(f"evaluation_size = {evaluation_size}")
+    test_size = int(metadata["test"]["length"] * partial_load)
+    logging.info(f"test_size = {test_size}")
+
+    train_dataset = (
+        tf.data.Dataset.from_generator(
+            gen_embedded_dataset,
+            output_signature=(
+                tf.TensorSpec(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), dtype=tf.float32)
+            ),
+            args=(f"{WIKIPEDIA_DATA_DIR}/train",),
+        )
+        .take(int(train_size / BATCH_SIZE))
+        .batch(BATCH_SIZE)
+        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
+    )
+    test_dataset = (
+        tf.data.Dataset.from_generator(
+            gen_embedded_dataset,
+            output_signature=(
+                tf.TensorSpec(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), dtype=tf.float32)
+            ),
+            args=(f"{WIKIPEDIA_DATA_DIR}/test",),
+        )
+        .take(int(evaluation_size / BATCH_SIZE))
+        .batch(BATCH_SIZE)
+        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
+    )
+    eval_dataset = (
+        tf.data.Dataset.from_generator(
+            gen_embedded_dataset,
+            output_signature=(
+                tf.TensorSpec(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), dtype=tf.float32)
+            ),
+            args=(f"{WIKIPEDIA_DATA_DIR}/evaluation",),
+        )
+        .take(int(test_size / BATCH_SIZE))
+        .batch(BATCH_SIZE)
+        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
+    )
+    return train_dataset, eval_dataset, test_dataset
+
+
+def compare_original_and_generated_sentences(inputs, predictions):
+    for inputt, prediction in zip(inputs.unbatch().as_numpy_iterator(), predictions):
+        inputt = convert_embedding_sentence_to_string_sentence(inputt)
+        prediction = convert_embedding_sentence_to_string_sentence(prediction)
+        logging.info(f"{inputt} -> {prediction}")
+
+
+def test_predictions(model, dataset):
+    def remove_target_from_dataset(inputt, target):
+        return inputt
+
+    dataset = dataset.map(
+        remove_target_from_dataset,
+        num_parallel_calls=NUM_PARALLEL_CALLS,
+        deterministic=False,
+    )
+    logging.info(dataset.element_spec)
+
+    predictions = model.predict(dataset.take(1))
+    compare_original_and_generated_sentences(dataset.take(1), predictions)
+    logging.info(dataset.take(1))
+    logging.info(predictions[0])
+    logging.info(predictions.shape)
+
+
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.DEBUG)
@@ -271,20 +298,24 @@ def main():
     logging.info(f"NUM_PARALLEL_CALLS = {NUM_PARALLEL_CALLS}")
     logging.info(f"DIMENSOES_ESPACO_LATENTE = {DIMENSOES_ESPACO_LATENTE}")
     logging.info(f"MODEL_NAME = {MODEL_NAME}")
+    logging.info(f"DROPOUT = {DROPOUT}")
+    logging.info(f"PATIENCE = {PATIENCE}")
+    logging.info(f"HIDDEN_LAYERS = {HIDDEN_LAYERS}")
+    logging.info(f"BIDIRECTIONAL = {BIDIRECTIONAL}")
+
+    train_dataset, eval_dataset, test_dataset = load_embedded_dataset()
+    logging.info(train_dataset.element_spec)
+    logging.info(eval_dataset.element_spec)
+    logging.info(test_dataset.element_spec)
 
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
-    logging.debug(list(train_dataset.take(1)))
-    logging.info(train_dataset.take(1).take(1).element_spec)
+    # train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
-    predictions = model.predict(eval_dataset.take(1))
-    logging.info(eval_dataset.take(1))
-    logging.info(predictions[0])
-    logging.info(predictions.shape)
+    test_predictions(model, test_dataset)
 
 
 if __name__ == "__main__":

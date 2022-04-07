@@ -62,6 +62,7 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
         vocabulary: str = None,
         vocabulary_size: int = 0,
         num_parallel_calls: int = tf.data.AUTOTUNE,
+        deterministic: bool = False,
     ):
         dataset = WikipediaDataset(data_dir, batch_size=batch_size)
 
@@ -81,7 +82,9 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
             return (vectorized_text, vectorized_target)
 
         dataset = dataset.map(
-            preprocess_text, num_parallel_calls=num_parallel_calls, deterministic=False,
+            preprocess_text,
+            num_parallel_calls=num_parallel_calls,
+            deterministic=deterministic,
         )
         if has_cache_enable():
             dataset.cache(
