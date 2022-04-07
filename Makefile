@@ -13,8 +13,10 @@ APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
 BATCH_SIZE ?= 32
 DATA_DIR ?= "data"
-EPOCHS ?= 100
+EMBEDDING_DIM ?= 50
+EMBEDDING_FILE ?= "$(DATA_DIR)/embeddings/glove_s50.txt"
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
+EPOCHS ?= 100
 MODEL_NAME ?= "text_autoencoder"
 MODEL_PATH ?= "models/$(MODEL_NAME)"
 VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
@@ -33,6 +35,8 @@ python_script = PYTHONPATH=$(PWD) \
 	VOCAB_SIZE=$(VOCAB_SIZE) \
 	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
 	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
+	EMBEDDING_FILE=$(EMBEDDING_FILE) \
+	EMBEDDING_DIM=$(EMBEDDING_DIM) \
 	python $(1)
 
 .PHONY: download-models

@@ -14,26 +14,26 @@ from gazettes.data import (
 )
 
 
-WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
-WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
-MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
-VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
-VOCAB_FILE = str(os.environ["VOCAB_FILE"])
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
-EPOCHS = int(os.environ.get("EPOCHS", 10))
-LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
-NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
+BIDIRECTIONAL = bool(os.environ.get("BIDIRECTIONAL", "1") == "1")
 DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
+DROPOUT = float(os.environ.get("DROPOUT", 0.2))
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", 50))
+EMBEDDING_FILE = os.environ["EMBEDDING_FILE"]
+EPOCHS = int(os.environ.get("EPOCHS", 10))
+HIDDEN_LAYERS = int(os.environ.get("HIDDEN_LAYERS", 1))
+LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
+MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
 MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
 MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
-
-DROPOUT = float(os.environ.get("DROPOUT", 0.2))
+NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 PATIENCE = int(os.environ.get("PATIENCE", 10))
-HIDDEN_LAYERS = int(os.environ.get("HIDDEN_LAYERS", 1))
-BIDIRECTIONAL = bool(os.environ.get("BIDIRECTIONAL", "1") == "1")
-EMBEDDING_DIM = 50
+VOCAB_FILE = str(os.environ["VOCAB_FILE"])
+VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
+WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
+WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
 
-embeddingmodel = KeyedVectors.load_word2vec_format("data/embeddings/glove_s50.txt")
+embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE)
 embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 embeddingmodel.add_vector("<UNK>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 
