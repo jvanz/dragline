@@ -10,7 +10,6 @@ from gensim.models import KeyedVectors
 from gazettes.data import (
     TextAutoencoderWikipediaDataset,
     WikipediaDataset,
-    TextAutoencoderEmbeddingWikipediaDataset,
     load_wikipedia_metadata,
 )
 
