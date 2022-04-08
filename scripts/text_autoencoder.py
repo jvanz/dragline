@@ -33,7 +33,7 @@ VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
 
-embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE)
+embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE, limit=VOCAB_SIZE)
 embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 embeddingmodel.add_vector("<UNK>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 
@@ -47,28 +47,31 @@ def get_checkpoint_dir(model):
 def create_model():
     logging.info("Creating model...")
 
-    dimensoes_espaco_latente = DIMENSOES_ESPACO_LATENTE
-    max_text_length = MAX_TEXT_LENGTH
-    vocab_size = VOCAB_SIZE
-    dropout = DROPOUT
-    embeddind_size = 50
-
     model = tf.keras.Sequential(name="autoencoder")
     model.add(
-        tf.keras.layers.Input(shape=(max_text_length, embeddind_size), name="input")
+        tf.keras.layers.Input(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), name="input")
     )
     model.add(
         tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(units=dimensoes_espaco_latente,),
+            tf.keras.layers.LSTM(
+                units=DIMENSOES_ESPACO_LATENTE,
+                dropout=DROPOUT,
+                recurrent_dropout=DROPOUT,
+            ),
             merge_mode="sum",
             name="encoder",
         )
     )
 
-    model.add(tf.keras.layers.RepeatVector(max_text_length, name="repeater"))
+    model.add(tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="repeater"))
     model.add(
         tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(units=embeddind_size, return_sequences=True),
+            tf.keras.layers.LSTM(
+                units=EMBEDDING_DIM,
+                return_sequences=True,
+                dropout=DROPOUT,
+                recurrent_dropout=DROPOUT,
+            ),
             merge_mode="sum",
             name="decoder",
         )
@@ -127,47 +130,9 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
     save_model(model, MODEL_PATH)
 
 
-def load_datasets(partial_load: float = 1.0):
-    logging.info("Loading datasets...")
-    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
-    train_size = int(metadata["train"]["length"] * partial_load)
-    logging.info(f"train_size = {train_size}")
-    evaluation_size = int(metadata["evaluation"]["length"] * partial_load)
-    logging.info(f"evaluation_size = {evaluation_size}")
-    test_size = int(metadata["test"]["length"] * partial_load)
-    logging.info(f"test_size = {test_size}")
-    train_dataset = TextAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/train",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(train_size / BATCH_SIZE))
-    eval_dataset = TextAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/evaluation",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(evaluation_size / BATCH_SIZE))
-    test_dataset = TextAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/test",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(test_size / BATCH_SIZE))
-    logging.info("Datasets loaded.")
-    return train_dataset, eval_dataset, test_dataset
-
-
 def gen_word_sequence(data_dir):
     train_dataset = WikipediaDataset(
         data_dir.decode("utf-8"),
-        # f"{WIKIPEDIA_DATA_DIR}/train",
         parallel_file_read=NUM_PARALLEL_CALLS,
         batch_size=BATCH_SIZE,
     )
@@ -309,8 +274,6 @@ def main():
 
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
-
-    # train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
