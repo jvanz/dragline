@@ -53,11 +53,7 @@ def create_model():
     )
     model.add(
         tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(
-                units=DIMENSOES_ESPACO_LATENTE,
-                dropout=DROPOUT,
-                recurrent_dropout=DROPOUT,
-            ),
+            tf.keras.layers.LSTM(units=DIMENSOES_ESPACO_LATENTE, dropout=DROPOUT,),
             merge_mode="sum",
             name="encoder",
         )
@@ -67,10 +63,7 @@ def create_model():
     model.add(
         tf.keras.layers.Bidirectional(
             tf.keras.layers.LSTM(
-                units=EMBEDDING_DIM,
-                return_sequences=True,
-                dropout=DROPOUT,
-                recurrent_dropout=DROPOUT,
+                units=EMBEDDING_DIM, return_sequences=True, dropout=DROPOUT,
             ),
             merge_mode="sum",
             name="decoder",
@@ -109,11 +102,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_best_only=False,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
-        monitor="loss",
-        mode="min",
-        # min_delta=1e-2,
-        patience=PATIENCE,
-        restore_best_weights=True,
+        monitor="loss", mode="min", patience=PATIENCE, restore_best_weights=True,
     )
     tb_callback = tf.keras.callbacks.TensorBoard("./logs", update_freq=1)
 
