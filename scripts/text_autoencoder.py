@@ -22,16 +22,19 @@ EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", 50))
 EMBEDDING_FILE = os.environ["EMBEDDING_FILE"]
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 HIDDEN_LAYERS = int(os.environ.get("HIDDEN_LAYERS", 1))
+HIDDEN_LAYERS_TYPE = str(os.environ.get("HIDDEN_LAYERS_TYPE", "lstm")).lower()
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
 MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
-MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
-MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 PATIENCE = int(os.environ.get("PATIENCE", 10))
 VOCAB_FILE = str(os.environ["VOCAB_FILE"])
 VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
+
+MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
+MODEL_NAME = f"{MODEL_NAME}_{HIDDEN_LAYERS}_{HIDDEN_LAYERS_TYPE}_{VOCAB_SIZE}"
+MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
 
 embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE, limit=VOCAB_SIZE)
 embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
@@ -51,24 +54,73 @@ def create_model():
     model.add(
         tf.keras.layers.Input(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), name="input")
     )
-    model.add(
-        tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(units=DIMENSOES_ESPACO_LATENTE, dropout=DROPOUT,),
-            merge_mode="sum",
-            name="encoder",
-        )
-    )
+    for li in range(HIDDEN_LAYERS):
+        layer = None
+        layer_name = f"encoder{li}-{HIDDEN_LAYERS_TYPE}"
+        if HIDDEN_LAYERS_TYPE == "lstm":
+            layer = tf.keras.layers.LSTM(
+                units=DIMENSOES_ESPACO_LATENTE,
+                dropout=DROPOUT,
+                return_sequences=False if li == HIDDEN_LAYERS - 1 else True,
+                name=layer_name,
+            )
+        else:
+            layer = tf.keras.layers.GRU(
+                units=DIMENSOES_ESPACO_LATENTE,
+                dropout=DROPOUT,
+                return_sequences=False if li == HIDDEN_LAYERS - 1 else True,
+                name=layer_name,
+            )
+        if BIDIRECTIONAL:
+            model.add(
+                tf.keras.layers.Bidirectional(layer, name=layer_name, merge_mode="sum")
+            )
+        else:
+            model.add(layer)
 
     model.add(tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="repeater"))
-    model.add(
-        tf.keras.layers.Bidirectional(
-            tf.keras.layers.LSTM(
-                units=EMBEDDING_DIM, return_sequences=True, dropout=DROPOUT,
-            ),
-            merge_mode="sum",
-            name="decoder",
-        )
-    )
+    for li in range(HIDDEN_LAYERS):
+        layer_name = f"decoder{li}-{HIDDEN_LAYERS_TYPE}"
+        if HIDDEN_LAYERS_TYPE == "lstm":
+            if BIDIRECTIONAL:
+                model.add(
+                    tf.keras.layers.Bidirectional(
+                        tf.keras.layers.LSTM(
+                            units=EMBEDDING_DIM, return_sequences=True, dropout=DROPOUT,
+                        ),
+                        name=layer_name,
+                        merge_mode="sum",
+                    )
+                )
+            else:
+                model.add(
+                    tf.keras.layers.LSTM(
+                        units=EMBEDDING_DIM,
+                        return_sequences=True,
+                        dropout=DROPOUT,
+                        name=layer_name,
+                    ),
+                )
+        else:
+            if BIDIRECTIONAL:
+                model.add(
+                    tf.keras.layers.Bidirectional(
+                        tf.keras.layers.GRU(
+                            units=EMBEDDING_DIM, return_sequences=True, dropout=DROPOUT
+                        ),
+                        name=layer_name,
+                        merge_mode="sum",
+                    )
+                )
+            else:
+                model.add(
+                    tf.keras.layers.GRU(
+                        units=EMBEDDING_DIM,
+                        return_sequences=True,
+                        dropout=DROPOUT,
+                        name=layer_name,
+                    ),
+                )
 
     model.compile(
         loss=tf.keras.losses.MeanSquaredError(),
