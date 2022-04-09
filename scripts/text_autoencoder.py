@@ -154,7 +154,7 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         save_best_only=False,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
-        monitor="loss", mode="min", patience=PATIENCE, restore_best_weights=True,
+        monitor="val_loss", mode="min", patience=PATIENCE, restore_best_weights=True,
     )
     tb_callback = tf.keras.callbacks.TensorBoard("./logs", update_freq=1)
 
