@@ -31,10 +31,13 @@ VOCAB_FILE = str(os.environ["VOCAB_FILE"])
 VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
+OPTIMIZER = str(os.environ.get("OPTIMIZER", "adam"))
+LOSS = str(os.environ.get("LOSS", "mse"))
+METRICS = str(os.environ.get("METRICS", "mse,"))
 
 MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
-MODEL_NAME = f"{MODEL_NAME}_{HIDDEN_LAYERS}_{HIDDEN_LAYERS_TYPE}_{VOCAB_SIZE}"
-MODEL_PATH = os.environ.get("MODEL_PATH", f"models/{MODEL_NAME}")
+MODEL_NAME = f"{MODEL_NAME}_{HIDDEN_LAYERS}_{'bidirectional_' if BIDIRECTIONAL else ''}{HIDDEN_LAYERS_TYPE}_{VOCAB_SIZE}"
+MODEL_PATH = os.environ.get("MODEL_PATH", f"models")
 
 embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE, limit=VOCAB_SIZE)
 embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
@@ -42,15 +45,19 @@ embeddingmodel.add_vector("<UNK>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 
 
 def get_checkpoint_dir(model):
-    checkpoint_dir = f"{os.getcwd()}/checkpoints/{MODEL_NAME}"
+    checkpoint_dir = f"{os.getcwd()}/checkpoints/{build_model_name()}"
     os.makedirs(checkpoint_dir, exist_ok=True)
     return checkpoint_dir
+
+
+def build_model_name():
+    return f"{MODEL_NAME}_{LOSS}_{OPTIMIZER}_{METRICS.replace(',','-')}"
 
 
 def create_model():
     logging.info("Creating model...")
 
-    model = tf.keras.Sequential(name="autoencoder")
+    model = tf.keras.Sequential(name=build_model_name())
     model.add(
         tf.keras.layers.Input(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), name="input")
     )
@@ -122,10 +129,30 @@ def create_model():
                     ),
                 )
 
+    loss = None
+    if LOSS == "cosine":
+        loss = tf.keras.losses.CosineSimilarity()
+    else:
+        loss = tf.keras.losses.MeanSquaredError()
+    logging.info(f"loss: {loss}")
+
+    optimizer = None
+    if OPTIMIZER == "sgd":
+        optimizer = tf.keras.optimizers.SGD()
+    else:
+        optimizer = tf.keras.optimizers.Adam()
+    logging.info(f"optimizer: {optimizer}")
+
+    metrics = []
+    for metric in METRICS.split(","):
+        if metric == "mse":
+            metrics.append(tf.keras.metrics.MeanSquaredError())
+        if metric == "cosine":
+            metrics.append(tf.keras.metrics.CosineSimilarity())
+    logging.info(f"metrics: {metrics}")
+
     model.compile(
-        loss=tf.keras.losses.MeanSquaredError(),
-        optimizer=tf.keras.optimizers.Adam(),
-        metrics=[tf.keras.metrics.MeanSquaredError()],
+        loss=loss, optimizer=optimizer, metrics=metrics,
     )
     return model
 
@@ -138,16 +165,21 @@ def create_or_load_model():
 
 
 def save_model(model, model_path: str):
+    logging.info(f"Saving model at {model_path}")
+    model.save(f"{model_path}", overwrite=True)
+    with open(f"{model_path}/model.json", "w") as jsonfile:
+        jsonfile.write(model.to_json())
     tf.keras.utils.plot_model(
         model, show_shapes=True, to_file=f"{model_path}/model_plot.png"
     )
-    model.save(model_path, overwrite=True)
 
 
 def train_model(model, train_dataset, validation_dataset, test_dataset):
     logging.info("Training model...")
+    checkpoint_dir = get_checkpoint_dir(model)
+    logging.info(f"Checkpoint dir: {checkpoint_dir}")
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        filepath=get_checkpoint_dir(model),
+        filepath=checkpoint_dir,
         save_weights_only=True,
         monitor="val_accuracy",
         mode="max",
@@ -164,11 +196,6 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         epochs=EPOCHS,
         callbacks=[model_checkpoint_callback, early_stop_callback, tb_callback],
     )
-    results = model.evaluate(test_dataset, return_dict=True,)
-    print()
-    print(f"Model evaluation: {results}")
-    print()
-    save_model(model, MODEL_PATH)
 
 
 def gen_word_sequence(data_dir):
@@ -232,7 +259,7 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/train",),
         )
-        .take(int(train_size / BATCH_SIZE))
+        # .take(int(train_size / BATCH_SIZE))
         .batch(BATCH_SIZE)
         .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
     )
@@ -244,7 +271,7 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/test",),
         )
-        .take(int(evaluation_size / BATCH_SIZE))
+        # .take(int(evaluation_size / BATCH_SIZE))
         .batch(BATCH_SIZE)
         .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
     )
@@ -256,7 +283,7 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/evaluation",),
         )
-        .take(int(test_size / BATCH_SIZE))
+        # .take(int(test_size / BATCH_SIZE))
         .batch(BATCH_SIZE)
         .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
     )
@@ -288,6 +315,20 @@ def test_predictions(model, dataset):
     logging.info(predictions.shape)
 
 
+def evaluate_model(model, dataset, model_path):
+    results = model.evaluate(dataset, return_dict=True,)
+    print()
+    print(f"Fitted model evaluation: {results}")
+    print()
+    logging.info(f"Loading model {model_path}")
+    model = tf.keras.models.load_model(model_path, compile=True)
+    model.summary()
+    results = model.evaluate(dataset, return_dict=True,)
+    print()
+    print(f"Loaded model evaluation: {results}")
+    print()
+
+
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.DEBUG)
@@ -303,6 +344,7 @@ def main():
     logging.info(f"NUM_PARALLEL_CALLS = {NUM_PARALLEL_CALLS}")
     logging.info(f"DIMENSOES_ESPACO_LATENTE = {DIMENSOES_ESPACO_LATENTE}")
     logging.info(f"MODEL_NAME = {MODEL_NAME}")
+    logging.info(f"MODEL_PATH = {MODEL_PATH}")
     logging.info(f"DROPOUT = {DROPOUT}")
     logging.info(f"PATIENCE = {PATIENCE}")
     logging.info(f"HIDDEN_LAYERS = {HIDDEN_LAYERS}")
@@ -318,7 +360,9 @@ def main():
 
     model = create_or_load_model()
     train_model(model, train_dataset, eval_dataset, test_dataset)
-    test_predictions(model, test_dataset)
+    save_model(model, f"{MODEL_PATH}/{model.name}")
+    evaluate_model(model, test_dataset, f"{MODEL_PATH}/{model.name}")
+    # test_predictions(model, test_dataset)
 
 
 if __name__ == "__main__":

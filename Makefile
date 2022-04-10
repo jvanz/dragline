@@ -18,7 +18,7 @@ EMBEDDING_FILE ?= "$(DATA_DIR)/embeddings/glove_s50.txt"
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
 EPOCHS ?= 1000
 MODEL_NAME ?= "text_autoencoder"
-MODEL_PATH ?= "models/$(MODEL_NAME)"
+MODEL_PATH ?= "$(PWD)/models"
 VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
 VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
@@ -148,10 +148,11 @@ show_data_info:
 predict-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
 predict-autoencoder:
 	PYTHONPATH=$(PWD) python scripts/predict_text.py \
-		   -m models/text_autoencoder \
+		   -m models/${MODEL_NAME} \
 		   --embeddings-file=$(EMBEDDING_FILE) \
 		   --embeddings-dimensions=$(EMBEDDING_DIM) \
-		   --dataset-dir=$(WIKIPEDIA_DATA_DIR)/test
+		   --dataset-dir=$(WIKIPEDIA_DATA_DIR)/test \
+		   --vocab-size=$(VOCAB_SIZE)
 
 
 .PHONY: build-vocab

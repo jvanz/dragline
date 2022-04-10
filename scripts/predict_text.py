@@ -15,7 +15,7 @@ UNKNOWN_TOKEN = "<UNK>"
 
 def load_model(model_path):
     logging.info(f"Loading model {model_path}")
-    model = tf.keras.models.load_model(model_path, compile=False)
+    model = tf.keras.models.load_model(model_path, compile=True)
     model.summary()
     return model
 
@@ -60,13 +60,14 @@ def parse_command_line_arguments():
     parser.add_argument(
         "--parallel-calls", required=False, type=int, default=tf.data.AUTOTUNE, help="",
     )
+    parser.add_argument("--vocab-size", required=True, type=int)
     args = parser.parse_args()
     args.model = str(args.model)
     args.dataset_dir = str(args.dataset_dir)
     return args
 
 
-def load_embeddings(embeddings_file, embeddings_dimensions):
+def load_embeddings(embeddings_file, embeddings_dimensions, vocab_size):
     global embeddingmodel
     embeddingmodel = KeyedVectors.load_word2vec_format(embeddings_file)
     embeddingmodel.add_vector(
@@ -107,18 +108,26 @@ def gen_embedded_dataset(data_dir: str, max_text_length: int, batch_size: int):
         yield embedding_sentence
 
 
+def add_target(sentence):
+    return (sentence, sentence)
+
+
 def load_embedded_dataset(
     data_dir: str, max_text_length: int, embeddings_dimensions: int, batch_size: int
 ):
-    dataset = tf.data.Dataset.from_generator(
-        gen_embedded_dataset,
-        output_signature=(
-            tf.TensorSpec(
-                shape=(max_text_length, embeddings_dimensions), dtype=tf.float32
-            )
-        ),
-        args=(data_dir, max_text_length, batch_size,),
-    ).batch(batch_size)
+    dataset = (
+        tf.data.Dataset.from_generator(
+            gen_embedded_dataset,
+            output_signature=(
+                tf.TensorSpec(
+                    shape=(max_text_length, embeddings_dimensions), dtype=tf.float32
+                )
+            ),
+            args=(data_dir, max_text_length, batch_size,),
+        )
+        .batch(batch_size)
+        .map(add_target, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False)
+    )
     return dataset
 
 
@@ -144,20 +153,18 @@ def main():
     logging.basicConfig(level=logging.DEBUG)
     args = parse_command_line_arguments()
     model = load_model(args.model)
-    embeddings = load_embeddings(args.embeddings_file, args.embeddings_dimensions)
+    embeddings = load_embeddings(
+        args.embeddings_file, args.embeddings_dimensions, args.vocab_size
+    )
     dataset = load_embedded_dataset(
         args.dataset_dir,
         args.max_text_length,
         args.embeddings_dimensions,
         args.batch_size,
     )
-
-    inputt = dataset.take(1)
-    predictions = model.predict(inputt)
-    for inputt, prediction in zip(
-        convert_dataset_to_string(inputt), convert_predictions_to_string(predictions)
-    ):
-        print(f"INPUT: {inputt}\nPREDICTION: {prediction}\n\n")
+    print(dataset.element_spec)
+    results = model.evaluate(dataset)
+    print(results)
 
 
 if __name__ == "__main__":
