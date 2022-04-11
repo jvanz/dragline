@@ -188,14 +188,9 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
         def organize_targets(input_ids, token_type_ids, attention_mask, target):
             return (
                 (input_ids, token_type_ids, attention_mask),
-                tf.one_hot(target, vocabulary_size),
+                # tf.one_hot(target, vocabulary_size),
+                target
             )
-
-        # def onehot_target(inputs, target):
-        #     return (
-        #         inputs,
-        #         tf.one_hot(target, vocabulary_size),
-        #     )
 
         dataset = dataset.map(organize_targets)
         logging.info(dataset.element_spec)

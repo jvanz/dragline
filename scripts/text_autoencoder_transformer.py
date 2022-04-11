@@ -7,24 +7,32 @@ from transformers import (
 )
 import tensorflow as tf
 import numpy as np
+from gensim.models import KeyedVectors
 
 from gazettes.data import TextBertAutoencoderWikipediaDataset, load_wikipedia_metadata
 
-WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
-WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
-MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
-VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
+DEFAULT_MODEL_NAME = "text_transformer_autoencoder"
+DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
+DROPOUT = float(os.environ.get("DROPOUT", 0.2))
+# EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", 50))
+# EMBEDDING_FILE = os.environ["EMBEDDING_FILE"]
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
-NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
-DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
-DEFAULT_MODEL_NAME = "text_transformer_autoencoder"
-MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
+MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
 MODEL_CHECKPOINT = os.environ.get(
     "MODEL_CHECKPOINT", "neuralmind/bert-base-portuguese-cased"
 )
+MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
+NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 VOCAB_FILE = os.environ.get("VOCAB_FILE", "data/bertimbau_base_vocab.txt")
+VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
+WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
+WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
+
+# embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE, limit=VOCAB_SIZE)
+# embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
+# embeddingmodel.add_vector("<UNK>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 
 
 def load_bertimbau_model():
@@ -58,17 +66,18 @@ def create_model():
     )(encoded)
 
     # decoder
-    decoder = tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="decoder0")(
+    decoder = tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="repeater")(
         encoder_output
     )
-    decoder = tf.keras.layers.Dropout(0.2, name="decoder1")(decoder)
     decoder = tf.keras.layers.Bidirectional(
-        tf.keras.layers.GRU(units=DIMENSOES_ESPACO_LATENTE, return_sequences=True,),
-        name="decoder2",
+        tf.keras.layers.LSTM(
+            units=DIMENSOES_ESPACO_LATENTE,
+            return_sequences=True,
+            dropout=DROPOUT,
+        ),
+        merge_mode="sum",
+        name="decoder",
     )(decoder)
-    decoder = tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder4")(
-        decoder
-    )
 
     model = tf.keras.models.Model(
         inputs=[input_ids, token_types_ids, attention_mask],
@@ -84,6 +93,13 @@ def create_model():
     return model
 
 
+def convert_text_to_embedding(in1, int2, in3, text):
+    for sentence in text:
+        return tf.keras.preprocessing.text.text_to_word_sequence(
+            sentence.numpy().decode("utf-8")
+        )
+
+
 def load_datasets(partial_load: float = 1.0):
     logging.info("Loading datasets...")
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
@@ -93,14 +109,18 @@ def load_datasets(partial_load: float = 1.0):
     logging.info(f"evaluation_size = {evaluation_size}")
     test_size = int(metadata["test"]["length"] * partial_load)
     logging.info(f"test_size = {test_size}")
-    train_dataset = TextBertAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/train",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(train_size / BATCH_SIZE))
+    train_dataset = (
+        TextBertAutoencoderWikipediaDataset(
+            f"{WIKIPEDIA_DATA_DIR}/train",
+            parallel_file_read=NUM_PARALLEL_CALLS,
+            batch_size=BATCH_SIZE,
+            max_text_length=MAX_TEXT_LENGTH,
+            vocabulary=VOCAB_FILE,
+            vocabulary_size=VOCAB_SIZE,
+        )
+        .take(int(train_size / BATCH_SIZE))
+        # .map(convert_text_to_embedding)
+    )
     eval_dataset = TextBertAutoencoderWikipediaDataset(
         f"{WIKIPEDIA_DATA_DIR}/evaluation",
         parallel_file_read=NUM_PARALLEL_CALLS,
@@ -172,7 +192,7 @@ def main():
     logging.info(list(train_dataset.take(1)))
     logging.info(train_dataset.element_spec)
     model = create_model()
-    train_model(model, train_dataset, eval_dataset, test_dataset)
+    # train_model(model, train_dataset, eval_dataset, test_dataset)
 
 
 if __name__ == "__main__":
