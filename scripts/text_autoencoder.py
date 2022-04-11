@@ -138,9 +138,9 @@ def create_model():
 
     optimizer = None
     if OPTIMIZER == "sgd":
-        optimizer = tf.keras.optimizers.SGD()
+        optimizer = tf.keras.optimizers.SGD(learning_rate=LEARNING_RATE)
     else:
-        optimizer = tf.keras.optimizers.Adam()
+        optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
     logging.info(f"optimizer: {optimizer}")
 
     metrics = []
@@ -241,15 +241,8 @@ def add_target(sentence):
 
 
 def load_embedded_dataset():
-    partial_load = WIKIPEDIA_DATASET_SIZE
     logging.info("Loading datasets...")
     metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
-    train_size = int(metadata["train"]["length"] * partial_load)
-    logging.info(f"train_size = {train_size}")
-    evaluation_size = int(metadata["evaluation"]["length"] * partial_load)
-    logging.info(f"evaluation_size = {evaluation_size}")
-    test_size = int(metadata["test"]["length"] * partial_load)
-    logging.info(f"test_size = {test_size}")
 
     train_dataset = (
         tf.data.Dataset.from_generator(
@@ -259,9 +252,9 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/train",),
         )
-        # .take(int(train_size / BATCH_SIZE))
-        .batch(BATCH_SIZE)
-        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
+        .batch(BATCH_SIZE).map(
+            add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,
+        )
     )
     test_dataset = (
         tf.data.Dataset.from_generator(
@@ -271,9 +264,9 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/test",),
         )
-        # .take(int(evaluation_size / BATCH_SIZE))
-        .batch(BATCH_SIZE)
-        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
+        .batch(BATCH_SIZE).map(
+            add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,
+        )
     )
     eval_dataset = (
         tf.data.Dataset.from_generator(
@@ -283,9 +276,9 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/evaluation",),
         )
-        # .take(int(test_size / BATCH_SIZE))
-        .batch(BATCH_SIZE)
-        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
+        .batch(BATCH_SIZE).map(
+            add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,
+        )
     )
     return train_dataset, eval_dataset, test_dataset
 

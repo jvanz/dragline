@@ -24,6 +24,7 @@ VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
 WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
 PATIENCE ?= 20
+LEARNING_RATE ?= 0.00001
 
 
 python_script = PYTHONPATH=$(PWD) \
@@ -39,6 +40,7 @@ python_script = PYTHONPATH=$(PWD) \
 	EMBEDDING_FILE=$(EMBEDDING_FILE) \
 	EMBEDDING_DIM=$(EMBEDDING_DIM) \
 	PATIENCE=$(PATIENCE) \
+	LEARNING_RATE=$(LEARNING_RATE) \
 	python $(1)
 
 .PHONY: download-models
