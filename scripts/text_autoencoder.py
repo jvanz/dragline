@@ -189,12 +189,18 @@ def train_model(model, train_dataset, validation_dataset, test_dataset):
         monitor="val_loss", mode="min", patience=PATIENCE, restore_best_weights=True,
     )
     tb_callback = tf.keras.callbacks.TensorBoard("./logs", update_freq=1)
+    nan_callback = tf.keras.callbacks.TerminateOnNaN()
 
     model.fit(
         train_dataset,
         validation_data=validation_dataset,
         epochs=EPOCHS,
-        callbacks=[model_checkpoint_callback, early_stop_callback, tb_callback],
+        callbacks=[
+            model_checkpoint_callback,
+            early_stop_callback,
+            tb_callback,
+            nan_callback,
+        ],
     )
 
 
@@ -252,9 +258,8 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/train",),
         )
-        .batch(BATCH_SIZE).map(
-            add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,
-        )
+        .batch(BATCH_SIZE)
+        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
     )
     test_dataset = (
         tf.data.Dataset.from_generator(
@@ -264,9 +269,8 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/test",),
         )
-        .batch(BATCH_SIZE).map(
-            add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,
-        )
+        .batch(BATCH_SIZE)
+        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
     )
     eval_dataset = (
         tf.data.Dataset.from_generator(
@@ -276,9 +280,8 @@ def load_embedded_dataset():
             ),
             args=(f"{WIKIPEDIA_DATA_DIR}/evaluation",),
         )
-        .batch(BATCH_SIZE).map(
-            add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,
-        )
+        .batch(BATCH_SIZE)
+        .map(add_target, num_parallel_calls=NUM_PARALLEL_CALLS, deterministic=False,)
     )
     return train_dataset, eval_dataset, test_dataset
 
