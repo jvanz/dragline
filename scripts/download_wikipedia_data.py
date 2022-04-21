@@ -14,7 +14,7 @@ import tensorflow as tf
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
 MAX_WORKERS = 10
-MINIMUM_SENTENCE_WORD_COUNT = 16
+MINIMUM_SENTENCE_WORD_COUNT = 3
 
 VALID_SENTENCE_REGEX = r"^[\s\w,]+$"
 
@@ -187,6 +187,7 @@ def write_tfrecord_files(datasets):
 
 def main():
 
+    print(f"DATA_DIR: {DATA_DIR}")
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(f"{DATA_DIR}/wikipedia", exist_ok=True)
     os.makedirs(f"{DATA_DIR}/wikipedia/train", exist_ok=True)
