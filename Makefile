@@ -149,7 +149,13 @@ show_data_info:
 .PHONY: predict-autoencoder
 predict-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
 predict-autoencoder:
-	PYTHONPATH=$(PWD) python scripts/predict_text.py -m models/text_autoencoder -d autoencoder  --dataset-dir $(WIKIPEDIA_DATA_DIR) --vocab-file $(VOCAB_FILE) --vocab-size $(VOCAB_SIZE) --batch-size $(BATCH_SIZE)
+	PYTHONPATH=$(PWD) python scripts/predict_text.py \
+		   -m models/${MODEL_NAME} \
+		   --embeddings-file=$(EMBEDDING_FILE) \
+		   --embeddings-dimensions=$(EMBEDDING_DIM) \
+		   --dataset-dir=$(WIKIPEDIA_DATA_DIR)/test \
+		   --vocab-size=$(VOCAB_SIZE)
+
 
 .PHONY: build-vocab
 build-vocab: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
