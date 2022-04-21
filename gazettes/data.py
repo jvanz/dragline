@@ -90,13 +90,9 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
         return dataset
 
 
-def load_bert_tokenizer(model_checkpoint: str, vocab_file: str):
+def load_bert_tokenizer(model_checkpoint: str):
     return AutoTokenizer.from_pretrained(
-        model_checkpoint,
-        use_fast=False,
-        vocab_file=vocab_file,
-        clean_text=True,
-        do_lower_case=True,
+        model_checkpoint, do_lower_case=False, use_fast=False
     )
 
 
@@ -107,13 +103,11 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
         parallel_file_read: int = 4,
         batch_size: int = 1000,
         max_text_length: int = 64,
-        vocabulary: str = None,
-        vocabulary_size: int = 0,
         num_parallel_calls: int = tf.data.AUTOTUNE,
         model_checkpoint: str = "neuralmind/bert-base-portuguese-cased",
     ):
         dataset = WikipediaDataset(data_dir)
-        tokenizer = load_bert_tokenizer(model_checkpoint, vocabulary)
+        tokenizer = load_bert_tokenizer(model_checkpoint)
 
         def preprocess_text(text):
             tokenizer_output = tokenizer(
@@ -126,7 +120,6 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                 tokenizer_output["input_ids"],
                 tokenizer_output["token_type_ids"],
                 tokenizer_output["attention_mask"],
-                tokenizer_output["input_ids"],
             )
 
         def tf_python_preprocess_text(text):
@@ -142,9 +135,6 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                     ),
                     tf.TensorSpec(
                         shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="target"
                     ),
                 ],
             )
@@ -166,9 +156,6 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                     tf.TensorSpec(
                         shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
                     ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="target"
-                    ),
                 ],
             )
 
@@ -180,7 +167,7 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
         if has_cache_enable():
             dataset.cache(get_cache_dir(data_dir, "transformer_preprocessing"),)
 
-        def organize_targets(input_ids, token_type_ids, attention_mask, target):
+        def organize_targets(input_ids, token_type_ids, attention_mask):
             return (
                 (input_ids, token_type_ids, attention_mask),
                 target,
@@ -190,7 +177,7 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
         def onehot_target(inputs, target):
             return (
                 inputs,
-                tf.one_hot(target, vocabulary_size),
+                tf.one_hot(input_ids, tokenizer.vocab_size),
             )
 
         dataset = dataset.map(organize_targets)

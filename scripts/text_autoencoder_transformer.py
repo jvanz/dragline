@@ -1,14 +1,28 @@
 import os
 import logging
+import json
 
 from transformers import (
     TFBertModel,
+    TFBertForMaskedLM,
+    TFBertLMHeadModel,
+    TFBertForSequenceClassification,
+    TFEncoderDecoderModel,
+    EncoderDecoderModel,
+    BertGenerationEncoder,
+    BertGenerationDecoder,
     AutoTokenizer,
+    BertTokenizer,
 )
-import tensorflow as tf
-import numpy as np
 
-from gazettes.data import TextBertAutoencoderWikipediaDataset, load_wikipedia_metadata
+# import tensorflow as tf
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+# from gensim.models import KeyedVectors
+
+from gazettes.data import WikipediaDataset
 
 WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
 WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
@@ -24,101 +38,84 @@ MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
 MODEL_CHECKPOINT = os.environ.get(
     "MODEL_CHECKPOINT", "neuralmind/bert-base-portuguese-cased"
 )
+MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
+# NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
 VOCAB_FILE = os.environ.get("VOCAB_FILE", "data/bertimbau_base_vocab.txt")
+VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
+WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
+WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
+
+PATIENCE = 20
 
 
-def load_bertimbau_model():
-    return TFBertModel.from_pretrained(MODEL_CHECKPOINT, from_pt=True)
+class BertDataset(torch.utils.data.IterableDataset):
+    def __init__(self, data_dir: str, dataset_dir: str, tokenizer):
+        self.data_dir = f"{data_dir}/{dataset_dir}"
+        self.tokenizer = tokenizer
+        with open(f"{data_dir}/metadata.json", "r") as jsonfile:
+            metadata = json.load(jsonfile)
+            self.length = metadata[dataset_dir].get("length", 0)
+
+    def __len__(self):
+        return self.length
+
+    def __iter__(self):
+        dataset = WikipediaDataset(self.data_dir)
+        for batch in dataset.as_numpy_iterator():
+            for sample in batch:
+                input_ids = self.tokenizer(
+                    sample.decode("utf8"),
+                    add_special_tokens=True,
+                    return_tensors="pt",
+                    truncation=True,
+                    padding="max_length",
+                    max_length=40,
+                ).input_ids[0]
+                yield input_ids, input_ids
 
 
-def create_model():
-    # encoder
-    bertimbau = load_bertimbau_model()
-    bertimbau.trainable = False
-
-    input_ids = tf.keras.layers.Input(
-        shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="input_ids"
-    )
-    token_types_ids = tf.keras.layers.Input(
-        shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="token_types_ids"
-    )
-    attention_mask = tf.keras.layers.Input(
-        shape=(MAX_TEXT_LENGTH,), dtype=tf.int32, name="attention_mask"
-    )
-
-    encoded = bertimbau(
-        {
-            "input_ids": input_ids,
-            "token_types_ids": token_types_ids,
-            "attention_mask": attention_mask,
-        }
-    )["pooler_output"]
-    encoder_output = tf.keras.layers.Dense(
-        DIMENSOES_ESPACO_LATENTE, name="encoder_output"
-    )(encoded)
-
-    # decoder
-    decoder = tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="decoder0")(
-        encoder_output
-    )
-    decoder = tf.keras.layers.Dropout(0.2, name="decoder1")(decoder)
-    decoder = tf.keras.layers.Bidirectional(
-        tf.keras.layers.GRU(units=DIMENSOES_ESPACO_LATENTE, return_sequences=True,),
-        name="decoder2",
-    )(decoder)
-    decoder = tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder4")(
-        decoder
+def create_model(tokenizer):
+    encoder = BertGenerationEncoder.from_pretrained(
+        MODEL_CHECKPOINT, bos_token_id=103, eos_token_id=102
     )
 
-    model = tf.keras.models.Model(
-        inputs=[input_ids, token_types_ids, attention_mask],
-        outputs=decoder,
-        name=MODEL_NAME,
+    # add cross attention layers and use BERT's cls token as BOS token and sep token as EOS token
+    decoder = BertGenerationDecoder.from_pretrained(
+        MODEL_CHECKPOINT,
+        add_cross_attention=True,
+        is_decoder=True,
+        bos_token_id=101,
+        eos_token_id=102,
     )
-    model.compile(
-        loss=tf.keras.losses.CategoricalCrossentropy(),
-        optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-        metrics=["acc"],
-    )
-    model.summary()
+    model = EncoderDecoderModel(encoder=encoder, decoder=decoder)
+    
+    model.config.decoder_start_token_id = tokenizer.cls_token_id
+    model.config.pad_token_id = tokenizer.pad_token_id
+    model.config.vocab_size = model.config.decoder.vocab_size
+
     return model
 
 
-def load_datasets(partial_load: float = 1.0):
-    logging.info("Loading datasets...")
-    metadata = load_wikipedia_metadata(WIKIPEDIA_DATA_DIR)
-    train_size = int(metadata["train"]["length"] * partial_load)
-    logging.info(f"train_size = {train_size}")
-    evaluation_size = int(metadata["evaluation"]["length"] * partial_load)
-    logging.info(f"evaluation_size = {evaluation_size}")
-    test_size = int(metadata["test"]["length"] * partial_load)
-    logging.info(f"test_size = {test_size}")
-    train_dataset = TextBertAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/train",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(train_size / BATCH_SIZE))
-    eval_dataset = TextBertAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/evaluation",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(evaluation_size / BATCH_SIZE))
-    test_dataset = TextBertAutoencoderWikipediaDataset(
-        f"{WIKIPEDIA_DATA_DIR}/test",
-        parallel_file_read=NUM_PARALLEL_CALLS,
-        batch_size=BATCH_SIZE,
-        max_text_length=MAX_TEXT_LENGTH,
-        vocabulary=VOCAB_FILE,
-        vocabulary_size=VOCAB_SIZE,
-    ).take(int(test_size / BATCH_SIZE))
-    logging.info("Datasets loaded.")
-    return train_dataset, eval_dataset, test_dataset
+def load_datasets():
+    tokenizer = BertTokenizer.from_pretrained(
+        MODEL_CHECKPOINT,
+        do_lower_case=False,
+        use_fast=False,
+        bos_token_id=101,
+        eos_token_id=102,
+    )
+    train_dataset = BertDataset("data/wikipedia", "train", tokenizer)
+    print(f"len(train_dataset): {len(train_dataset)}")
+    eval_dataset = BertDataset("data/wikipedia", "evaluation", tokenizer)
+    print(f"len(eval_dataset): {len(eval_dataset)}")
+    test_dataset = BertDataset("data/wikipedia", "test", tokenizer)
+    print(f"len(test_dataset): {len(test_dataset)}")
+    return (
+        DataLoader(train_dataset, batch_size=32),
+        DataLoader(eval_dataset, batch_size=32),
+        DataLoader(test_dataset, batch_size=32),
+        tokenizer,
+    )
 
 
 def get_checkpoint_dir(model):
@@ -127,52 +124,54 @@ def get_checkpoint_dir(model):
     return checkpoint_dir
 
 
-def train_model(model, train_dataset, validation_dataset, test_dataset):
-    logging.info("Training model...")
-    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        filepath=get_checkpoint_dir(model),
-        save_weights_only=True,
-        monitor="val_accuracy",
-        mode="max",
-        save_best_only=True,
+def train_loop(dataset, model, loss_fn, optimizer):
+    size = len(dataset.dataset)
+    for batch, (inputs, expected_prediction) in enumerate(dataset):
+        output = model(input_ids=inputs, labels=inputs)
+        loss = output.loss
+
+        optimizer.zero_grad()
+        output.loss.backward()
+        optimizer.step()
+
+        if batch % 100 == 0:
+            loss, current = loss.item(), batch * len(inputs)
+            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+
+def test_loop(dataset, model, loss_fn):
+    size = len(dataset.dataset)
+    num_batches = len(dataset)
+    test_loss, correct = 0, 0
+    with torch.no_grad():
+        for inputs, expected_prediction in dataset:
+            predictions = model(inputs)
+            test_loop += loss_fn(predictions, expected_prediction).item()
+            correct += (predictions.argmax(1) == y).type(torch.float).sum().item()
+    test_loop /= num_batches
+    correct /= size
+    print(
+        f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f} \n"
     )
-    model.fit(
-        train_dataset,
-        validation_data=validation_dataset,
-        epochs=EPOCHS,
-        callbacks=[model_checkpoint_callback],
-    )
-    results = model.evaluate(test_dataset)
-    print()
-    print(f"Model evaluation: {results}")
-    print()
-    model.save(f"models/{MODEL_NAME}", overwrite=True)
+
+
+def train_torch_model(model, train_dataset, eval_dataset, test_dataset):
+    loss_fn = torch.nn.MSELoss
+    optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
+    for epoch in range(EPOCHS):
+        print(f"Epoch {epoch+1}/{EPOCHS}\n--------------------------")
+        train_loop(train_dataset, model, loss_fn, optimizer)
+        test_loop(eval_dataset, model, loss_fn)
+        torch.save(model, "models/text_transformer_autoencoder.pth")
+    print("Done!")
 
 
 def main():
-    tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.INFO)
 
-    logging.info(f"WIKIPEDIA_DATA_DIR = {WIKIPEDIA_DATA_DIR}")
-    logging.info(f"WIKIPEDIA_DATASET_SIZE = {WIKIPEDIA_DATASET_SIZE}")
-    logging.info(f"MAX_TEXT_LENGTH = {MAX_TEXT_LENGTH}")
-    logging.info(f"VOCAB_SIZE = {VOCAB_SIZE}")
-    logging.info(f"BATCH_SIZE = {BATCH_SIZE}")
-    logging.info(f"EPOCHS = {EPOCHS}")
-    logging.info(f"LEARNING_RATE = {LEARNING_RATE}")
-    logging.info(f"NUM_PARALLEL_CALLS = {NUM_PARALLEL_CALLS}")
-    logging.info(f"DIMENSOES_ESPACO_LATENTE = {DIMENSOES_ESPACO_LATENTE}")
-    logging.info(f"MODEL_NAME = {MODEL_NAME}")
-    logging.info(f"MODEL_CHECKPOINT = {MODEL_CHECKPOINT}")
-
-    gpu_count = len(tf.config.list_physical_devices("GPU"))
-    logging.info(f"Números de GPUs disponíveis: {gpu_count}")
-
-    train_dataset, eval_dataset, test_dataset = load_datasets(WIKIPEDIA_DATASET_SIZE)
-    logging.info(list(train_dataset.take(1)))
-    logging.info(train_dataset.element_spec)
-    model = create_model()
-    train_model(model, train_dataset, eval_dataset, test_dataset)
+    train_dataset, eval_dataset, test_dataset, tokenizer = load_datasets()
+    model = create_model(tokenizer)
+    train_torch_model(model, train_dataset, eval_dataset, test_dataset)
 
 
 if __name__ == "__main__":
