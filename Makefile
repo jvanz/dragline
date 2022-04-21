@@ -13,14 +13,18 @@ APACHE_TIKA_CONTAINER_NAME ?= apache-tika
 
 BATCH_SIZE ?= 32
 DATA_DIR ?= "data"
-EPOCHS ?= 100
+EMBEDDING_DIM ?= 50
+EMBEDDING_FILE ?= "$(DATA_DIR)/embeddings/glove_s50.txt"
 ENV_NAME ?= $(shell conda env export --json | jq ".name")
+EPOCHS ?= 1000
 MODEL_NAME ?= "text_autoencoder"
-MODEL_PATH ?= "models/$(MODEL_NAME)"
+MODEL_PATH ?= "$(PWD)/models"
 VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
 VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
 WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
+PATIENCE ?= 20
+LEARNING_RATE ?= 0.00001
 
 
 python_script = PYTHONPATH=$(PWD) \
@@ -33,6 +37,10 @@ python_script = PYTHONPATH=$(PWD) \
 	VOCAB_SIZE=$(VOCAB_SIZE) \
 	WIKIPEDIA_DATASET_SIZE=$(WIKIPEDIA_DATASET_SIZE) \
 	WIKIPEDIA_DATA_DIR=$(WIKIPEDIA_DATA_DIR) \
+	EMBEDDING_FILE=$(EMBEDDING_FILE) \
+	EMBEDDING_DIM=$(EMBEDDING_DIM) \
+	PATIENCE=$(PATIENCE) \
+	LEARNING_RATE=$(LEARNING_RATE) \
 	python $(1)
 
 .PHONY: download-models
@@ -111,6 +119,7 @@ update-conda-env:
 .PHONY: train-autoencoder
 train-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
 train-autoencoder:
+	rm -rf logs
 	$(call python_script, scripts/text_autoencoder.py)
 
 
@@ -158,3 +167,9 @@ clean-cache:
 .PHONY: clean-wikipedia
 clean-wikipedia:
 	rm -rf $(WIKIPEDIA_DATA_DIR)
+
+.PHONY: download-word-embeddings
+download-word-embeddings:
+	mkdir -p $(DATA_DIR)/embeddings
+	curl -o $(DATA_DIR)/embeddings/glove_s50.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s50.zip
+	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s50.zip
