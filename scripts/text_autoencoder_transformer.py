@@ -15,38 +15,17 @@ from transformers import (
     BertTokenizer,
 )
 
-# import tensorflow as tf
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-# from gensim.models import KeyedVectors
 
 from gazettes.data import WikipediaDataset
 
-WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
-WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
-MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
-VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 32))
 EPOCHS = int(os.environ.get("EPOCHS", 10))
-LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
-NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
-DIMENSOES_ESPACO_LATENTE = int(os.environ.get("DIMENSOES_ESPACO_LATENTE", 32))
-DEFAULT_MODEL_NAME = "text_transformer_autoencoder"
-MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
 MODEL_CHECKPOINT = os.environ.get(
     "MODEL_CHECKPOINT", "neuralmind/bert-base-portuguese-cased"
 )
-MODEL_NAME = os.environ.get("MODEL_NAME", DEFAULT_MODEL_NAME)
-# NUM_PARALLEL_CALLS = int(os.environ.get("NUM_PARALLEL_CALLS", tf.data.AUTOTUNE))
-VOCAB_FILE = os.environ.get("VOCAB_FILE", "data/bertimbau_base_vocab.txt")
-VOCAB_SIZE = int(os.environ.get("VOCAB_SIZE", 4096))
-WIKIPEDIA_DATASET_SIZE = float(os.environ.get("WIKIPEDIA_DATASET_SIZE", 1.0))
-WIKIPEDIA_DATA_DIR = str(os.environ.get("WIKIPEDIA_DATA_DIR", "data/wikipedia"))
-
-PATIENCE = 20
-
 
 class BertDataset(torch.utils.data.IterableDataset):
     def __init__(self, data_dir: str, dataset_dir: str, tokenizer):
