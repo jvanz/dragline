@@ -124,9 +124,8 @@ train-autoencoder:
 
 
 .PHONY: train-transformer-autoencoder
-train-transformer-autoencoder: MODEL_NAME="text_transformer_autoencoder"
 train-transformer-autoencoder:
-	$(call python_script, scripts/text_autoencoder_transformer.py)
+	PYTHONPATH=$(PWD) python scripts/text_autoencoder_transformer.py --data-dir=$(WIKIPEDIA_DATA_DIR)
 
 .PHONY: download_wikipedia_dataset
 download_wikipedia_dataset:

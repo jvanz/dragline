@@ -1,13 +1,11 @@
 import os
 import logging
+import argparse
 import json
+import pathlib
+import csv
 
 from transformers import (
-    TFBertModel,
-    TFBertForMaskedLM,
-    TFBertLMHeadModel,
-    TFBertForSequenceClassification,
-    TFEncoderDecoderModel,
     EncoderDecoderModel,
     BertGenerationEncoder,
     BertGenerationDecoder,
@@ -19,17 +17,16 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-
-from gazettes.data import WikipediaDataset
-
 EPOCHS = int(os.environ.get("EPOCHS", 10))
 MODEL_CHECKPOINT = os.environ.get(
     "MODEL_CHECKPOINT", "neuralmind/bert-base-portuguese-cased"
 )
 
+
 class BertDataset(torch.utils.data.IterableDataset):
-    def __init__(self, data_dir: str, dataset_dir: str, tokenizer):
-        self.data_dir = f"{data_dir}/{dataset_dir}"
+    def __init__(self, data_dir, dataset_dir: str, tokenizer):
+        self.data_dir = data_dir
+        self.dataset_dir = dataset_dir
         self.tokenizer = tokenizer
         with open(f"{data_dir}/metadata.json", "r") as jsonfile:
             metadata = json.load(jsonfile)
@@ -39,11 +36,12 @@ class BertDataset(torch.utils.data.IterableDataset):
         return self.length
 
     def __iter__(self):
-        dataset = WikipediaDataset(self.data_dir)
-        for batch in dataset.as_numpy_iterator():
-            for sample in batch:
+        with open(f"{self.data_dir}/{self.dataset_dir}.csv", "r") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                sample = row["text"]
                 input_ids = self.tokenizer(
-                    sample.decode("utf8"),
+                    sample,
                     add_special_tokens=True,
                     return_tensors="pt",
                     truncation=True,
@@ -67,7 +65,7 @@ def create_model(tokenizer):
         eos_token_id=102,
     )
     model = EncoderDecoderModel(encoder=encoder, decoder=decoder)
-    
+
     model.config.decoder_start_token_id = tokenizer.cls_token_id
     model.config.pad_token_id = tokenizer.pad_token_id
     model.config.vocab_size = model.config.decoder.vocab_size
@@ -75,20 +73,13 @@ def create_model(tokenizer):
     return model
 
 
-def load_datasets():
-    tokenizer = BertTokenizer.from_pretrained(
-        MODEL_CHECKPOINT,
-        do_lower_case=False,
-        use_fast=False,
-        bos_token_id=101,
-        eos_token_id=102,
-    )
-    train_dataset = BertDataset("data/wikipedia", "train", tokenizer)
-    print(f"len(train_dataset): {len(train_dataset)}")
-    eval_dataset = BertDataset("data/wikipedia", "evaluation", tokenizer)
-    print(f"len(eval_dataset): {len(eval_dataset)}")
-    test_dataset = BertDataset("data/wikipedia", "test", tokenizer)
-    print(f"len(test_dataset): {len(test_dataset)}")
+def load_datasets(data_dir, tokenizer):
+    train_dataset = BertDataset(data_dir, "train", tokenizer)
+    print(f"train_dataset size: {len(train_dataset)}")
+    eval_dataset = BertDataset(data_dir, "evaluation", tokenizer)
+    print(f"eval_dataset size: {len(eval_dataset)}")
+    test_dataset = BertDataset(data_dir, "test", tokenizer)
+    print(f"test_dataset size: {len(test_dataset)}")
     return (
         DataLoader(train_dataset, batch_size=32),
         DataLoader(eval_dataset, batch_size=32),
@@ -103,10 +94,13 @@ def get_checkpoint_dir(model):
     return checkpoint_dir
 
 
-def train_loop(dataset, model, loss_fn, optimizer):
+def train_loop(dataset, model, loss_fn, optimizer, device):
     size = len(dataset.dataset)
     for batch, (inputs, expected_prediction) in enumerate(dataset):
-        output = model(input_ids=inputs, labels=inputs)
+        inputs = inputs.to(device)
+        expected_prediction = expected_prediction.to(device)
+
+        output = model(input_ids=inputs, decoder_input_ids=inputs, labels=inputs)
         loss = output.loss
 
         optimizer.zero_grad()
@@ -134,23 +128,54 @@ def test_loop(dataset, model, loss_fn):
     )
 
 
-def train_torch_model(model, train_dataset, eval_dataset, test_dataset):
+def train_torch_model(model, train_dataset, eval_dataset, test_dataset, device):
     loss_fn = torch.nn.MSELoss
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
     for epoch in range(EPOCHS):
         print(f"Epoch {epoch+1}/{EPOCHS}\n--------------------------")
-        train_loop(train_dataset, model, loss_fn, optimizer)
+        train_loop(train_dataset, model, loss_fn, optimizer, device)
         test_loop(eval_dataset, model, loss_fn)
         torch.save(model, "models/text_transformer_autoencoder.pth")
     print("Done!")
 
 
+def parse_command_line_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data-dir",
+        required=True,
+        type=pathlib.Path,
+        help="Path to dataset directory with the data to predict",
+    )
+    args = parser.parse_args()
+    return args
+
+
 def main():
     logging.basicConfig(level=logging.INFO)
+    args = parse_command_line_arguments()
 
-    train_dataset, eval_dataset, test_dataset, tokenizer = load_datasets()
+    if torch.cuda.is_available():
+        logging.info("CUDA is available")
+        current_device = torch.cuda.get_device_name(torch.cuda.current_device())
+        logging.info(f"Device in use: {current_device}")
+        logging.info(f"CUDA version: {torch.version.cuda}")
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tokenizer = BertTokenizer.from_pretrained(
+        MODEL_CHECKPOINT,
+        do_lower_case=False,
+        use_fast=False,
+        bos_token_id=101,
+        eos_token_id=102,
+    )
+
+    train_dataset, eval_dataset, test_dataset, tokenizer = load_datasets(
+        args.data_dir, tokenizer
+    )
     model = create_model(tokenizer)
-    train_torch_model(model, train_dataset, eval_dataset, test_dataset)
+    model.to(device)
+    train_torch_model(model, train_dataset, eval_dataset, test_dataset, device)
 
 
 if __name__ == "__main__":
