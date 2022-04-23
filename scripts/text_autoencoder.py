@@ -21,7 +21,6 @@ DROPOUT = float(os.environ.get("DROPOUT", 0.2))
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", 50))
 EMBEDDING_FILE = os.environ["EMBEDDING_FILE"]
 EPOCHS = int(os.environ.get("EPOCHS", 10))
-HIDDEN_LAYERS = int(os.environ.get("HIDDEN_LAYERS", 1))
 HIDDEN_LAYERS_TYPE = str(os.environ.get("HIDDEN_LAYERS_TYPE", "lstm")).lower()
 LEARNING_RATE = float(os.environ.get("LEARNING_RATE", 0.001))
 MAX_TEXT_LENGTH = int(os.environ.get("MAX_TEXT_LENGTH", 64))
@@ -35,9 +34,6 @@ OPTIMIZER = str(os.environ.get("OPTIMIZER", "adam"))
 LOSS = str(os.environ.get("LOSS", "mse"))
 METRICS = str(os.environ.get("METRICS", "mse,"))
 
-MODEL_NAME = os.environ.get("MODEL_NAME", "text_autoencoder")
-MODEL_NAME = f"{MODEL_NAME}_{HIDDEN_LAYERS}_{'bidirectional_' if BIDIRECTIONAL else ''}{HIDDEN_LAYERS_TYPE}_{VOCAB_SIZE}"
-MODEL_PATH = os.environ.get("MODEL_PATH", f"models")
 
 embeddingmodel = KeyedVectors.load_word2vec_format(EMBEDDING_FILE, limit=VOCAB_SIZE)
 embeddingmodel.add_vector("<PAD>", np.random.uniform(-1, 1, EMBEDDING_DIM))
@@ -45,26 +41,22 @@ embeddingmodel.add_vector("<UNK>", np.random.uniform(-1, 1, EMBEDDING_DIM))
 
 
 def get_checkpoint_dir(model):
-    checkpoint_dir = f"{os.getcwd()}/checkpoints/{build_model_name()}"
+    checkpoint_dir = f"{os.getcwd()}/checkpoints/autoencoder"
     os.makedirs(checkpoint_dir, exist_ok=True)
     return checkpoint_dir
 
 
-def build_model_name():
-    return f"{MODEL_NAME}_{LOSS}_{OPTIMIZER}_{METRICS.replace(',','-')}"
-
-
-def create_model():
+def create_model(rnn_type, hidden_layers_count):
     logging.info("Creating model...")
 
-    model = tf.keras.Sequential(name=build_model_name())
+    model = tf.keras.Sequential()
     model.add(
         tf.keras.layers.Input(shape=(MAX_TEXT_LENGTH, EMBEDDING_DIM), name="input")
     )
-    for li in range(HIDDEN_LAYERS):
+    for li in range(hidden_layers_count):
         layer = None
         layer_name = f"encoder{li}-{HIDDEN_LAYERS_TYPE}"
-        if HIDDEN_LAYERS_TYPE == "lstm":
+        if rnn_type == "lstm":
             layer = tf.keras.layers.LSTM(
                 units=DIMENSOES_ESPACO_LATENTE,
                 dropout=DROPOUT,
@@ -86,9 +78,9 @@ def create_model():
             model.add(layer)
 
     model.add(tf.keras.layers.RepeatVector(MAX_TEXT_LENGTH, name="repeater"))
-    for li in range(HIDDEN_LAYERS):
+    for li in range(hidden_layers_count):
         layer_name = f"decoder{li}-{HIDDEN_LAYERS_TYPE}"
-        if HIDDEN_LAYERS_TYPE == "lstm":
+        if rnn_type == "lstm":
             if BIDIRECTIONAL:
                 model.add(
                     tf.keras.layers.Bidirectional(
@@ -157,9 +149,9 @@ def create_model():
     return model
 
 
-def create_or_load_model():
+def create_or_load_model(rnn_type, hidden_layers_count):
     # TODO - load model from checkpoint
-    model = create_model()
+    model = create_model(rnn_type, hidden_layers_count)
     model.summary()
     return model
 
@@ -325,9 +317,44 @@ def evaluate_model(model, dataset, model_path):
     print()
 
 
+def command_line_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--rnn-type",
+        required=True,
+        type=str,
+        help="RNN type to be used in the hidden layers",
+    )
+    parser.add_argument(
+        "--hidden-layers-count",
+        required=True,
+        type=int,
+        help="The number of hidden layers in the encoder and decoder ",
+    )
+    parser.add_argument(
+        "--train",
+        required=False,
+        type=bool,
+        default=False,
+        help="Train model from scratch",
+    )
+    parser.add_argument(
+        "--save-model-at",
+        required=False,
+        type=str,
+        default=None,
+        help="Save model after training in the defined path",
+    )
+    args = parser.parse_args()
+    return args
+
+
 def main():
+    import pdb
+    pdb.set_trace()
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.DEBUG)
+    args = command_line_args()
 
     logging.info(f"WIKIPEDIA_DATA_DIR = {WIKIPEDIA_DATA_DIR}")
     logging.info(f"WIKIPEDIA_DATASET_SIZE = {WIKIPEDIA_DATASET_SIZE}")
@@ -339,25 +366,24 @@ def main():
     logging.info(f"LEARNING_RATE = {LEARNING_RATE}")
     logging.info(f"NUM_PARALLEL_CALLS = {NUM_PARALLEL_CALLS}")
     logging.info(f"DIMENSOES_ESPACO_LATENTE = {DIMENSOES_ESPACO_LATENTE}")
-    logging.info(f"MODEL_NAME = {MODEL_NAME}")
-    logging.info(f"MODEL_PATH = {MODEL_PATH}")
     logging.info(f"DROPOUT = {DROPOUT}")
     logging.info(f"PATIENCE = {PATIENCE}")
-    logging.info(f"HIDDEN_LAYERS = {HIDDEN_LAYERS}")
     logging.info(f"BIDIRECTIONAL = {BIDIRECTIONAL}")
-
-    train_dataset, eval_dataset, test_dataset = load_embedded_dataset()
-    logging.info(train_dataset.element_spec)
-    logging.info(eval_dataset.element_spec)
-    logging.info(test_dataset.element_spec)
-
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    model = create_or_load_model()
-    train_model(model, train_dataset, eval_dataset, test_dataset)
-    save_model(model, f"{MODEL_PATH}/{model.name}")
-    evaluate_model(model, test_dataset, f"{MODEL_PATH}/{model.name}")
+    model = create_or_load_model(args.rnn_type, args.hidden_layers_count)
+
+    if args.train:
+        train_dataset, eval_dataset, test_dataset = load_embedded_dataset()
+        logging.info(train_dataset.element_spec)
+        logging.info(eval_dataset.element_spec)
+        logging.info(test_dataset.element_spec)
+
+        train_model(model, train_dataset, eval_dataset, test_dataset)
+        if args.save_model_at:
+            save_model(model, args.save_model_at)
+        # evaluate_model(model, test_dataset, f"{MODEL_PATH}/{model.name}")
     # test_predictions(model, test_dataset)
 
 

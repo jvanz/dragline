@@ -120,7 +120,9 @@ update-conda-env:
 train-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
 train-autoencoder:
 	rm -rf logs
-	$(call python_script, scripts/text_autoencoder.py)
+	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
+        	--rnn-type lstm \
+        	--hidden-layers-count 1
 
 
 .PHONY: train-transformer-autoencoder
