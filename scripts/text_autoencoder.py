@@ -233,6 +233,7 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
+        .prefetch(8)
     )
     test_dataset = (
         tf.data.Dataset.from_generator(
@@ -249,6 +250,7 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
+        .prefetch(8)
     )
     eval_dataset = (
         tf.data.Dataset.from_generator(
@@ -265,6 +267,7 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
+        .prefetch(8)
     )
     return train_dataset, eval_dataset, test_dataset
 
