@@ -322,7 +322,7 @@ def command_line_args():
         "--vocab-size", required=False, type=int, default=10000, help="",
     )
     parser.add_argument(
-        "--dimensoes_espaco_latent", required=False, type=int, default=256
+        "--dimensoes-espaco-latent", required=False, type=int, default=256
     )
     parser.add_argument(
         "--bidirectional-hidden-layers",
@@ -331,12 +331,12 @@ def command_line_args():
         default=True,
         help="",
     )
-    parser.add_argument("--max_text_length", required=False, type=int, default=40)
-    parser.add_argument("--batch_size", required=False, type=int, default=32)
+    parser.add_argument("--max-text-length", required=False, type=int, default=40)
+    parser.add_argument("--batch-size", required=False, type=int, default=32)
     parser.add_argument("--epochs", required=False, type=int, default=1000)
     parser.add_argument("--patience", required=False, type=int, default=20)
     parser.add_argument(
-        "--num_parallel_calls", required=False, type=int, default=tf.data.AUTOTUNE
+        "--num-parallel-calls", required=False, type=int, default=tf.data.AUTOTUNE
     )
     parser.add_argument("--dropout", required=False, type=float, default=0.2)
     parser.add_argument(
@@ -394,7 +394,6 @@ def main():
         logging.info(train_dataset.element_spec)
         logging.info(eval_dataset.element_spec)
         logging.info(test_dataset.element_spec)
-        logging.debug(train_dataset.take(1))
 
         train_model(
             model,
@@ -408,7 +407,6 @@ def main():
         if args.save_model_at:
             save_model(model, args.save_model_at)
         evaluate_model(model, test_dataset, f"{MODEL_PATH}/{model.name}")
-    # test_predictions(model, test_dataset)
 
 
 if __name__ == "__main__":

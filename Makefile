@@ -127,6 +127,7 @@ train-autoencoder:
 		--embedding-file "$(DATA_DIR)/embeddings/glove_s50.txt" \
 		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
 		--epochs $(EPOCHS) \
+		--batch-size $(BATCH_SIZE) \
 		--train
 
 
