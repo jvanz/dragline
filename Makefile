@@ -121,8 +121,13 @@ train-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
 train-autoencoder:
 	rm -rf logs
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
-        	--rnn-type lstm \
-        	--hidden-layers-count 1
+		--rnn-type lstm \
+		--hidden-layers-count 1 \
+		--embedding-dimensions 50 \
+		--embedding-file "$(DATA_DIR)/embeddings/glove_s50.txt" \
+		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
+		--epochs $(EPOCHS) \
+		--train
 
 
 .PHONY: train-transformer-autoencoder
