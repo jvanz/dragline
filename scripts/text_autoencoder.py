@@ -15,7 +15,6 @@ from gazettes.data import (
     load_wikipedia_metadata,
 )
 
-
 def get_checkpoint_dir(model, name):
     checkpoint_dir = f"{os.getcwd()}/checkpoints/{name}"
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -32,6 +31,7 @@ def create_model(
     bidirectional,
     activation,
     model_name,
+    learning_rate
 ):
     logging.info("Creating model...")
 
@@ -92,11 +92,11 @@ def create_model(
     model = tf.keras.Model(encoder_input, decoder, name=model_name)
 
     loss = tf.keras.losses.MeanSquaredError()
-    optimizer = tf.keras.optimizers.Adam()
-    metrics = [tf.keras.metrics.MeanSquaredError()]
+    optimizer = tf.keras.optimizers.Adam(learning_rate)
+    #metrics = [tf.keras.metrics.MeanSquaredError()]
 
     model.compile(
-        loss=loss, optimizer=optimizer, metrics=metrics,
+        loss=loss, optimizer=optimizer 
     )
     return model
 
@@ -111,6 +111,7 @@ def create_or_load_model(
     bidirectional,
     activation,
     model_name,
+    learning_rate
 ):
     # TODO - load model from checkpoint
     model = create_model(
@@ -123,6 +124,7 @@ def create_or_load_model(
         bidirectional,
         activation,
         model_name,
+        learning_rate
     )
     model.summary()
     return model
@@ -144,10 +146,10 @@ def train_model(model, train_dataset, validation_dataset, epochs, model_name, pa
     logging.info(f"Checkpoint dir: {checkpoint_dir}")
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_dir,
-        save_weights_only=True,
-        monitor="val_accuracy",
-        mode="max",
-        save_best_only=False,
+        save_weights_only=False,
+        monitor="val_loss",
+        mode="min",
+        save_best_only=True,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
         monitor="val_loss", mode="min", patience=patience, restore_best_weights=True,
@@ -231,7 +233,6 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .shuffle(batch_size)
     )
     test_dataset = (
         tf.data.Dataset.from_generator(
@@ -248,7 +249,6 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .shuffle(batch_size)
     )
     eval_dataset = (
         tf.data.Dataset.from_generator(
@@ -265,7 +265,6 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .shuffle(batch_size)
     )
     return train_dataset, eval_dataset, test_dataset
 
@@ -349,6 +348,7 @@ def command_line_args():
         "--dataset-dir", required=True, type=pathlib.Path, help="",
     )
     parser.add_argument("--activation", required=False, type=str, default="relu")
+    parser.add_argument("--learning-rate", required=False, type=float, default=0.001)
 
     args = parser.parse_args()
     args.embedding_file = str(args.embedding_file)
@@ -400,6 +400,7 @@ def main():
             args.bidirectional_hidden_layers,
             args.activation,
             args.model_name,
+            args.learning_rate
         )
         train_model(
             model,
