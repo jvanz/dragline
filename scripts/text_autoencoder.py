@@ -30,15 +30,20 @@ def create_model(
     embedding_dimensions,
     dropout,
     bidirectional,
+    activation,
 ):
     logging.info("Creating model...")
 
     encoder_input = tf.keras.layers.Input(shape=(max_text_length, embedding_dimensions))
     layer = None
     if rnn_type == "lstm":
-        layer = tf.keras.layers.LSTM(units=dimensoes_espaco_latent, dropout=dropout)
+        layer = tf.keras.layers.LSTM(
+            units=dimensoes_espaco_latent, dropout=dropout, activation=activation
+        )
     else:
-        layer = tf.keras.layers.GRU(units=dimensoes_espaco_latent, dropout=dropout)
+        layer = tf.keras.layers.GRU(
+            units=dimensoes_espaco_latent, dropout=dropout, activation=activation
+        )
     encoder = None
     if bidirectional:
         encoder = tf.keras.layers.Bidirectional(layer, merge_mode="sum")(encoder_input)
@@ -50,25 +55,37 @@ def create_model(
         if bidirectional:
             decoder = tf.keras.layers.Bidirectional(
                 tf.keras.layers.LSTM(
-                    units=embedding_dimensions, return_sequences=True, dropout=dropout,
+                    units=embedding_dimensions,
+                    return_sequences=True,
+                    dropout=dropout,
+                    activation=activation,
                 ),
                 merge_mode="sum",
             )(decoder)
         else:
             decoder = tf.keras.layers.LSTM(
-                units=embedding_dimensions, return_sequences=True, dropout=dropout,
+                units=embedding_dimensions,
+                return_sequences=True,
+                dropout=dropout,
+                activation=activation,
             )(decoder)
     else:
         if bidirectional:
             decoder = tf.keras.layers.Bidirectional(
                 tf.keras.layers.GRU(
-                    units=embedding_dimensions, return_sequences=True, dropout=dropout,
+                    units=embedding_dimensions,
+                    return_sequences=True,
+                    dropout=dropout,
+                    activation=activation,
                 ),
                 merge_mode="sum",
             )(decoder)
         else:
             decoder = tf.keras.layers.GRU(
-                units=embedding_dimensions, return_sequences=True, dropout=dropout,
+                units=embedding_dimensions,
+                return_sequences=True,
+                dropout=dropout,
+                activation=activation,
             )(decoder)
 
     model = tf.keras.Model(encoder_input, decoder)
@@ -91,6 +108,7 @@ def create_or_load_model(
     embedding_dimensions,
     dropout,
     bidirectional,
+    activation,
 ):
     # TODO - load model from checkpoint
     model = create_model(
@@ -101,6 +119,7 @@ def create_or_load_model(
         embedding_dimensions,
         dropout,
         bidirectional,
+        activation,
     )
     model.summary()
     return model
@@ -345,6 +364,7 @@ def command_line_args():
     parser.add_argument(
         "--dataset-dir", required=True, type=pathlib.Path, help="",
     )
+    parser.add_argument("--activation", required=False, type=str, default="relu")
 
     args = parser.parse_args()
     args.embedding_file = str(args.embedding_file)
@@ -381,6 +401,7 @@ def main():
         args.embedding_dimensions,
         args.dropout,
         args.bidirectional_hidden_layers,
+        args.activation,
     )
 
     if args.train:
