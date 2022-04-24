@@ -128,7 +128,10 @@ train-autoencoder:
 		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
 		--epochs $(EPOCHS) \
 		--batch-size $(BATCH_SIZE) \
-		--train
+		--model-name lstm-autoencoder \
+		--save-model-at models/lstm-autoencoder \
+		--train \
+		--evaluate
 
 
 .PHONY: train-transformer-autoencoder

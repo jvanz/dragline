@@ -31,6 +31,7 @@ def create_model(
     dropout,
     bidirectional,
     activation,
+    model_name,
 ):
     logging.info("Creating model...")
 
@@ -88,7 +89,7 @@ def create_model(
                 activation=activation,
             )(decoder)
 
-    model = tf.keras.Model(encoder_input, decoder)
+    model = tf.keras.Model(encoder_input, decoder, name=model_name)
 
     loss = tf.keras.losses.MeanSquaredError()
     optimizer = tf.keras.optimizers.Adam()
@@ -109,6 +110,7 @@ def create_or_load_model(
     dropout,
     bidirectional,
     activation,
+    model_name,
 ):
     # TODO - load model from checkpoint
     model = create_model(
@@ -120,6 +122,7 @@ def create_or_load_model(
         dropout,
         bidirectional,
         activation,
+        model_name,
     )
     model.summary()
     return model
@@ -135,9 +138,7 @@ def save_model(model, model_path: str):
     )
 
 
-def train_model(
-    model, train_dataset, validation_dataset, test_dataset, epochs, model_name, patience
-):
+def train_model(model, train_dataset, validation_dataset, epochs, model_name, patience):
     logging.info("Training model...")
     checkpoint_dir = get_checkpoint_dir(model, model_name)
     logging.info(f"Checkpoint dir: {checkpoint_dir}")
@@ -276,29 +277,7 @@ def compare_original_and_generated_sentences(inputs, predictions):
         logging.info(f"{inputt} -> {prediction}")
 
 
-def test_predictions(model, dataset):
-    def remove_target_from_dataset(inputt, target):
-        return inputt
-
-    dataset = dataset.map(
-        remove_target_from_dataset,
-        num_parallel_calls=NUM_PARALLEL_CALLS,
-        deterministic=False,
-    )
-    logging.info(dataset.element_spec)
-
-    predictions = model.predict(dataset.take(1))
-    compare_original_and_generated_sentences(dataset.take(1), predictions)
-    logging.info(dataset.take(1))
-    logging.info(predictions[0])
-    logging.info(predictions.shape)
-
-
-def evaluate_model(model, dataset, model_path):
-    results = model.evaluate(dataset, return_dict=True,)
-    print()
-    print(f"Fitted model evaluation: {results}")
-    print()
+def evaluate_model(dataset, model_path):
     logging.info(f"Loading model {model_path}")
     model = tf.keras.models.load_model(model_path, compile=True)
     model.summary()
@@ -324,6 +303,12 @@ def command_line_args():
     )
     parser.add_argument(
         "--train", required=False, action="store_true", help="Train model from scratch",
+    )
+    parser.add_argument(
+        "--evaluate",
+        required=False,
+        action="store_true",
+        help="Evaluate model saved at --save-model-at",
     )
     parser.add_argument(
         "--save-model-at",
@@ -393,18 +378,7 @@ def main():
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    model = create_or_load_model(
-        args.dimensoes_espaco_latent,
-        args.rnn_type,
-        args.hidden_layers_count,
-        args.max_text_length,
-        args.embedding_dimensions,
-        args.dropout,
-        args.bidirectional_hidden_layers,
-        args.activation,
-    )
-
-    if args.train:
+    if args.train or args.evaluate:
         train_dataset, eval_dataset, test_dataset = load_embedded_dataset(
             args.dataset_dir,
             args.batch_size,
@@ -416,18 +390,31 @@ def main():
         logging.info(eval_dataset.element_spec)
         logging.info(test_dataset.element_spec)
 
+    if args.train:
+        model = create_or_load_model(
+            args.dimensoes_espaco_latent,
+            args.rnn_type,
+            args.hidden_layers_count,
+            args.max_text_length,
+            args.embedding_dimensions,
+            args.dropout,
+            args.bidirectional_hidden_layers,
+            args.activation,
+            args.model_name,
+        )
         train_model(
             model,
             train_dataset,
             eval_dataset,
-            test_dataset,
             args.epochs,
             args.model_name,
             args.patience,
         )
         if args.save_model_at:
             save_model(model, args.save_model_at)
-        evaluate_model(model, test_dataset, f"{MODEL_PATH}/{model.name}")
+
+    if args.evaluate:
+        evaluate_model(test_dataset, args.save_model_at)
 
 
 if __name__ == "__main__":
