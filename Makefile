@@ -116,10 +116,8 @@ update-conda-env:
 	echo "Exporting $(ENV_NAME)"
 	conda env export -n $(ENV_NAME) > $(ENV_NAME)_env.yml
 
-.PHONY: train-autoencoder
-train-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
-train-autoencoder:
-	rm -rf logs
+.PHONY: train-lstm-autoencoder
+train-lstm-autoencoder:
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
 		--rnn-type lstm \
 		--hidden-layers-count 1 \
@@ -130,6 +128,23 @@ train-autoencoder:
 		--batch-size $(BATCH_SIZE) \
 		--model-name lstm-autoencoder \
 		--save-model-at models/lstm-autoencoder \
+		--bidirectional-hidden-layers \
+		--train \
+		--evaluate
+	
+.PHONY: train-gru-autoencoder
+train-gru-autoencoder:
+	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
+		--rnn-type gru \
+		--hidden-layers-count 1 \
+		--embedding-dimensions 50 \
+		--embedding-file "$(DATA_DIR)/embeddings/glove_s50.txt" \
+		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
+		--epochs $(EPOCHS) \
+		--batch-size $(BATCH_SIZE) \
+		--model-name gru-autoencoder \
+		--save-model-at models/gru-autoencoder \
+		--bidirectional-hidden-layers \
 		--train \
 		--evaluate
 

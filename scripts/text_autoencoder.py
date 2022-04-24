@@ -331,8 +331,7 @@ def command_line_args():
     parser.add_argument(
         "--bidirectional-hidden-layers",
         required=False,
-        type=bool,
-        default=True,
+        action="store_true",
         help="",
     )
     parser.add_argument("--max-text-length", required=False, type=int, default=40)
