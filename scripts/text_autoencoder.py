@@ -294,7 +294,6 @@ def load_dataset(
 
     train_dataset = (
         WikipediaDataset(f"{dataset_dir}/train", batch_size=batch_size)
-        .take(8)
         .prefetch(8)
     )
     eval_dataset = WikipediaDataset(
