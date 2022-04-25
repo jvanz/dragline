@@ -15,6 +15,10 @@ from gazettes.data import (
     load_wikipedia_metadata,
 )
 
+PADDING_TOKEN = "<PAD>"
+UNK_TOKEN = "[UNK]"
+
+
 def get_checkpoint_dir(model, name):
     checkpoint_dir = f"{os.getcwd()}/checkpoints/{name}"
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -22,6 +26,7 @@ def get_checkpoint_dir(model, name):
 
 
 def create_model(
+    embedding_matrix,
     dimensoes_espaco_latent,
     rnn_type,
     hidden_layers_count,
@@ -31,11 +36,18 @@ def create_model(
     bidirectional,
     activation,
     model_name,
-    learning_rate
+    learning_rate,
+    vocab_size,
 ):
     logging.info("Creating model...")
 
-    encoder_input = tf.keras.layers.Input(shape=(max_text_length, embedding_dimensions))
+    encoder_input = tf.keras.layers.Input(shape=(max_text_length,), dtype="int64")
+    embedding = tf.keras.layers.Embedding(
+        vocab_size,
+        embedding_dimensions,
+        embeddings_initializer=tf.keras.initializers.Constant(embedding_matrix),
+        trainable=False,
+    )(encoder_input)
     layer = None
     if rnn_type == "lstm":
         layer = tf.keras.layers.LSTM(
@@ -47,9 +59,9 @@ def create_model(
         )
     encoder = None
     if bidirectional:
-        encoder = tf.keras.layers.Bidirectional(layer, merge_mode="sum")(encoder_input)
+        encoder = tf.keras.layers.Bidirectional(layer, merge_mode="sum")(embedding)
     else:
-        encoder = layer(encoder_input)
+        encoder = layer(embedding)
 
     decoder = tf.keras.layers.RepeatVector(max_text_length, name="repeater")(encoder)
     if rnn_type == "lstm":
@@ -93,15 +105,14 @@ def create_model(
 
     loss = tf.keras.losses.MeanSquaredError()
     optimizer = tf.keras.optimizers.Adam(learning_rate)
-    #metrics = [tf.keras.metrics.MeanSquaredError()]
+    # metrics = [tf.keras.metrics.MeanSquaredError()]
 
-    model.compile(
-        loss=loss, optimizer=optimizer 
-    )
+    model.compile(loss=loss, optimizer=optimizer)
     return model
 
 
 def create_or_load_model(
+    embedding_matrix,
     dimensoes_espaco_latent,
     rnn_type,
     hidden_layers_count,
@@ -111,10 +122,12 @@ def create_or_load_model(
     bidirectional,
     activation,
     model_name,
-    learning_rate
+    learning_rate,
+    vocab_size,
 ):
     # TODO - load model from checkpoint
     model = create_model(
+        embedding_matrix,
         dimensoes_espaco_latent,
         rnn_type,
         hidden_layers_count,
@@ -124,7 +137,8 @@ def create_or_load_model(
         bidirectional,
         activation,
         model_name,
-        learning_rate
+        learning_rate,
+        vocab_size,
     )
     model.summary()
     return model
@@ -272,6 +286,26 @@ def load_embedded_dataset(
     return train_dataset, eval_dataset, test_dataset
 
 
+def load_dataset(
+    dataset_dir: str, batch_size, max_text_length, embedding_dim, num_parallel_calls
+):
+    logging.info("Loading datasets...")
+    metadata = load_wikipedia_metadata(dataset_dir)
+
+    train_dataset = (
+        WikipediaDataset(f"{dataset_dir}/train", batch_size=batch_size)
+        .take(8)
+        .prefetch(8)
+    )
+    eval_dataset = WikipediaDataset(
+        f"{dataset_dir}/evaluation", batch_size=batch_size
+    ).prefetch(8)
+    test_dataset = WikipediaDataset(
+        f"{dataset_dir}/test", batch_size=batch_size
+    ).prefetch(8)
+    return train_dataset, eval_dataset, test_dataset
+
+
 def compare_original_and_generated_sentences(inputs, predictions):
     for inputt, prediction in zip(inputs.unbatch().as_numpy_iterator(), predictions):
         inputt = convert_embedding_sentence_to_string_sentence(inputt)
@@ -331,10 +365,7 @@ def command_line_args():
         "--dimensoes-espaco-latent", required=False, type=int, default=256
     )
     parser.add_argument(
-        "--bidirectional-hidden-layers",
-        required=False,
-        action="store_true",
-        help="",
+        "--bidirectional-hidden-layers", required=False, action="store_true", help="",
     )
     parser.add_argument("--max-text-length", required=False, type=int, default=40)
     parser.add_argument("--batch-size", required=False, type=int, default=32)
@@ -358,9 +389,78 @@ def command_line_args():
     return args
 
 
+def prepare_vectorization_layer(train_dataset, vocab_size, max_text_length):
+    logging.info("Vectorizing dataset...")
+    vectorization_layer = tf.keras.layers.TextVectorization(
+        vocab_size, output_sequence_length=max_text_length, pad_to_max_tokens=True
+    )
+    vectorization_layer.adapt(train_dataset)
+    return vectorization_layer
+
+
+def get_word_index(vectorization_layer):
+    voc = vectorization_layer.get_vocabulary()
+    return dict(zip(voc, range(len(voc))))
+
+
+def generate_embedding_matrix(vectorization_layer, vocab_size, embedding_dimensions):
+    logging.info("Building embedding matrix")
+    # Prepare embedding matrix
+    word_index = get_word_index(vectorization_layer)
+    logging.debug(word_index)
+    embedding_matrix = np.zeros((vocab_size, embedding_dimensions))
+    hits = 0
+    misses = 0
+
+    for word, i in word_index.items():
+        if i == 0:
+            embedding_matrix[i] = embeddingmodel.get_vector(PADDING_TOKEN)
+        elif i == 1:
+            embedding_matrix[i] = embeddingmodel.get_vector(UNK_TOKEN)
+        elif word in embeddingmodel:
+            # Words not found in embedding index will be all-zeros.
+            # This includes the representation for "padding" and "OOV"
+            embedding_matrix[i] = embeddingmodel.get_vector(word)
+            hits += 1
+        else:
+            misses += 1
+    logging.info("Converted %d words (%d misses)" % (hits, misses))
+    return embedding_matrix
+
+
+def vectorize_and_add_target_dataset(
+    dataset,
+    max_text_length,
+    vectorization_layer,
+    embedding_matrix,
+    batch_size,
+    embedding_dimensions,
+):
+    def vectorize_sentence(sentence):
+        sentence = vectorization_layer(sentence)
+        embsentence = []
+        for word in sentence:
+            embsentence.append(embedding_matrix[word])
+        return sentence, embsentence
+
+    def tf_vectorize_sentence(text):
+        return tf.py_function(
+            vectorize_sentence,
+            [text],
+            [
+                tf.TensorSpec(shape=(max_text_length,), dtype=tf.int64),
+                tf.TensorSpec(
+                    shape=(max_text_length, embedding_dimensions,), dtype=tf.float32
+                ),
+            ],
+        )
+
+    return dataset.unbatch().map(tf_vectorize_sentence).batch(batch_size)
+
+
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     args = command_line_args()
     logging.debug("##########################################")
     logging.debug(args)
@@ -371,29 +471,79 @@ def main():
         args.embedding_file, limit=args.vocab_size
     )
     embeddingmodel.add_vector(
-        "<PAD>", np.random.uniform(-1, 1, args.embedding_dimensions)
+        PADDING_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
     )
     embeddingmodel.add_vector(
-        "<UNK>", np.random.uniform(-1, 1, args.embedding_dimensions)
+        UNK_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
     )
+    # add 2 to cover unk and pad tokens
+    args.vocab_size += 2
 
     gpu_count = len(tf.config.list_physical_devices("GPU"))
     logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
-    if args.train or args.evaluate:
-        train_dataset, eval_dataset, test_dataset = load_embedded_dataset(
-            args.dataset_dir,
-            args.batch_size,
-            args.max_text_length,
-            args.embedding_dimensions,
-            args.num_parallel_calls,
-        )
-        logging.info(train_dataset.element_spec)
-        logging.info(eval_dataset.element_spec)
-        logging.info(test_dataset.element_spec)
+    train_dataset, eval_dataset, test_dataset = load_dataset(
+        args.dataset_dir,
+        args.batch_size,
+        args.max_text_length,
+        args.embedding_dimensions,
+        args.num_parallel_calls,
+    )
+    logging.info(train_dataset.element_spec)
+    logging.info(eval_dataset.element_spec)
+    logging.info(test_dataset.element_spec)
+
+    vectorization_layer = prepare_vectorization_layer(
+        train_dataset, args.vocab_size, args.max_text_length
+    )
+    embedding_matrix = generate_embedding_matrix(
+        vectorization_layer, args.vocab_size, args.embedding_dimensions
+    )
+
+    train_dataset = vectorize_and_add_target_dataset(
+        train_dataset,
+        args.max_text_length,
+        vectorization_layer,
+        embedding_matrix,
+        args.batch_size,
+        args.embedding_dimensions,
+    )
+    eval_dataset = vectorize_and_add_target_dataset(
+        eval_dataset,
+        args.max_text_length,
+        vectorization_layer,
+        embedding_matrix,
+        args.batch_size,
+        args.embedding_dimensions,
+    )
+    test_dataset = vectorize_and_add_target_dataset(
+        test_dataset,
+        args.max_text_length,
+        vectorization_layer,
+        embedding_matrix,
+        args.batch_size,
+        args.embedding_dimensions,
+    )
+    logging.info(train_dataset.element_spec)
+    logging.info(eval_dataset.element_spec)
+    logging.info(test_dataset.element_spec)
+
+    logging.info(list(train_dataset.take(1))[0])
+    sentences = list(train_dataset.unbatch().take(5))
+    for inputt, output in sentences:
+        print(inputt)
+        strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
+        print(" ".join(strs))
+        emnsentence = []
+        for i, emb in enumerate(output.numpy()):
+            assert np.array_equal(emb,embedding_matrix[inputt[i]])
+            matches = embeddingmodel.similar_by_vector(emb)
+            emnsentence.append(matches[0][0])
+        print(" ".join(emnsentence))
 
     if args.train:
         model = create_or_load_model(
+            embedding_matrix,
             args.dimensoes_espaco_latent,
             args.rnn_type,
             args.hidden_layers_count,
@@ -403,7 +553,8 @@ def main():
             args.bidirectional_hidden_layers,
             args.activation,
             args.model_name,
-            args.learning_rate
+            args.learning_rate,
+            args.vocab_size,
         )
         train_model(
             model,
