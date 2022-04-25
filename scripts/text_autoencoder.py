@@ -528,18 +528,18 @@ def main():
     logging.info(eval_dataset.element_spec)
     logging.info(test_dataset.element_spec)
 
-    logging.info(list(train_dataset.take(1))[0])
-    sentences = list(train_dataset.unbatch().take(5))
-    for inputt, output in sentences:
-        print(inputt)
-        strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
-        print(" ".join(strs))
-        emnsentence = []
-        for i, emb in enumerate(output.numpy()):
-            assert np.array_equal(emb,embedding_matrix[inputt[i]])
-            matches = embeddingmodel.similar_by_vector(emb)
-            emnsentence.append(matches[0][0])
-        print(" ".join(emnsentence))
+    #logging.info(list(train_dataset.take(1))[0])
+    #sentences = list(train_dataset.unbatch().take(5))
+    #for inputt, output in sentences:
+    #    print(inputt)
+    #    strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
+    #    print(" ".join(strs))
+    #    emnsentence = []
+    #    for i, emb in enumerate(output.numpy()):
+    #        assert np.array_equal(emb,embedding_matrix[inputt[i]])
+    #        matches = embeddingmodel.similar_by_vector(emb)
+    #        emnsentence.append(matches[0][0])
+    #    print(" ".join(emnsentence))
 
     if args.train:
         model = create_or_load_model(

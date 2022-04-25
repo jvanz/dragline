@@ -130,7 +130,7 @@ train-lstm-autoencoder:
 		--save-model-at models/lstm-autoencoder \
 		--bidirectional-hidden-layers \
 		--vocab-size 10000 \
-		#--train  --evaluate
+		--train  --evaluate
 	
 .PHONY: train-gru-autoencoder
 train-gru-autoencoder:
