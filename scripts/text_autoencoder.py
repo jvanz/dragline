@@ -204,12 +204,12 @@ def gen_embedded_dataset(data_dir, batch_size, max_text_length, num_parallel_cal
             if word in embeddingmodel:
                 embedding_sentence.append(embeddingmodel.get_vector(word))
             else:
-                embedding_sentence.append(embeddingmodel.get_vector("<UNK>"))
+                embedding_sentence.append(embeddingmodel.get_vector(UNK_TOKEN))
         if len(embedding_sentence) > max_text_length:
             embedding_sentence = embedding_sentence[:max_text_length]
         if len(embedding_sentence) < max_text_length:
             for _ in range(max_text_length - len(embedding_sentence)):
-                embedding_sentence.append(embeddingmodel.get_vector("<PAD>"))
+                embedding_sentence.append(embeddingmodel.get_vector(PADDING_TOKEN))
         assert len(embedding_sentence) == max_text_length
         yield embedding_sentence
 
@@ -217,7 +217,7 @@ def gen_embedded_dataset(data_dir, batch_size, max_text_length, num_parallel_cal
 def convert_embedding_sentence_to_string_sentence(sentence):
     strsentence = []
     for emb in sentence:
-        word = embeddingmodel.similar_by_vector(emb, 1)[0][0]
+        word = embeddingmodel.similar_by_vector(emb)[0][0]
         strsentence.append(word)
     return " ".join(strsentence)
 
@@ -292,10 +292,9 @@ def load_dataset(
     logging.info("Loading datasets...")
     metadata = load_wikipedia_metadata(dataset_dir)
 
-    train_dataset = (
-        WikipediaDataset(f"{dataset_dir}/train", batch_size=batch_size)
-        .prefetch(8)
-    )
+    train_dataset = WikipediaDataset(
+        f"{dataset_dir}/train", batch_size=batch_size
+    ).prefetch(8)
     eval_dataset = WikipediaDataset(
         f"{dataset_dir}/evaluation", batch_size=batch_size
     ).prefetch(8)
@@ -322,6 +321,28 @@ def evaluate_model(dataset, model_path):
     print()
 
 
+def predict_text(dataset, model_path, vectorization_layer):
+    logging.info(f"Loading model {model_path}")
+    model = tf.keras.models.load_model(model_path, compile=True)
+    model.summary()
+    dataset = dataset.map(lambda inputt, target: inputt)
+
+    inputt = list(dataset.unbatch().take(1))[0]
+    print(inputt)
+    strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
+    print(" ".join(strs))
+
+    inputt = list(dataset.unbatch().batch(1).take(1))
+    print(inputt)
+    output = model.predict_on_batch(inputt)
+    print(output)
+    emnsentence = []
+    for i, emb in enumerate(output[0]):
+        matches = embeddingmodel.similar_by_vector(emb)
+        emnsentence.append(matches[0][0])
+    print(" ".join(emnsentence))
+
+
 def command_line_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -344,6 +365,12 @@ def command_line_args():
         required=False,
         action="store_true",
         help="Evaluate model saved at --save-model-at",
+    )
+    parser.add_argument(
+        "--predict",
+        required=False,
+        action="store_true",
+        help="Predict some text with the model saved at --save-model-at",
     )
     parser.add_argument(
         "--save-model-at",
@@ -527,18 +554,16 @@ def main():
     logging.info(eval_dataset.element_spec)
     logging.info(test_dataset.element_spec)
 
-    #logging.info(list(train_dataset.take(1))[0])
-    #sentences = list(train_dataset.unbatch().take(5))
-    #for inputt, output in sentences:
-    #    print(inputt)
-    #    strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
-    #    print(" ".join(strs))
-    #    emnsentence = []
-    #    for i, emb in enumerate(output.numpy()):
-    #        assert np.array_equal(emb,embedding_matrix[inputt[i]])
-    #        matches = embeddingmodel.similar_by_vector(emb)
-    #        emnsentence.append(matches[0][0])
-    #    print(" ".join(emnsentence))
+    sentences = list(train_dataset.unbatch().take(5))
+    for inputt, output in sentences:
+        strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
+        print(" ".join(strs))
+        emnsentence = []
+        for i, emb in enumerate(output.numpy()):
+            assert np.array_equal(emb, embedding_matrix[inputt[i]])
+            matches = embeddingmodel.similar_by_vector(emb)
+            emnsentence.append(matches[0][0])
+        print(" ".join(emnsentence))
 
     if args.train:
         model = create_or_load_model(
@@ -568,6 +593,9 @@ def main():
 
     if args.evaluate:
         evaluate_model(test_dataset, args.save_model_at)
+
+    if args.predict:
+        predict_text(test_dataset, args.save_model_at, vectorization_layer)
 
 
 if __name__ == "__main__":
