@@ -294,13 +294,13 @@ def load_dataset(
 
     train_dataset = WikipediaDataset(
         f"{dataset_dir}/train", batch_size=batch_size
-    ).prefetch(8)
+    ).prefetch(batch_size)
     eval_dataset = WikipediaDataset(
         f"{dataset_dir}/evaluation", batch_size=batch_size
-    ).prefetch(8)
+    ).prefetch(batch_size)
     test_dataset = WikipediaDataset(
         f"{dataset_dir}/test", batch_size=batch_size
-    ).prefetch(8)
+    ).prefetch(batch_size)
     return train_dataset, eval_dataset, test_dataset
 
 
@@ -325,7 +325,11 @@ def predict_text(dataset, model_path, vectorization_layer):
     logging.info(f"Loading model {model_path}")
     model = tf.keras.models.load_model(model_path, compile=True)
     model.summary()
-    dataset = dataset.map(lambda inputt, target: inputt)
+    dataset = dataset.map(
+        lambda inputt, target: inputt,
+        num_parallel_calls=tf.data.AUTOTUNE,
+        deterministic=False,
+    )
 
     inputt = list(dataset.unbatch().take(1))[0]
     print(inputt)
@@ -429,11 +433,8 @@ def get_word_index(vectorization_layer):
     return dict(zip(voc, range(len(voc))))
 
 
-def generate_embedding_matrix(vectorization_layer, vocab_size, embedding_dimensions):
+def generate_embedding_matrix(word_index, vocab_size, embedding_dimensions):
     logging.info("Building embedding matrix")
-    # Prepare embedding matrix
-    word_index = get_word_index(vectorization_layer)
-    logging.debug(word_index)
     embedding_matrix = np.zeros((vocab_size, embedding_dimensions))
     hits = 0
     misses = 0
@@ -451,6 +452,7 @@ def generate_embedding_matrix(vectorization_layer, vocab_size, embedding_dimensi
         else:
             misses += 1
     logging.info("Converted %d words (%d misses)" % (hits, misses))
+    logging.info(f"Embedding matrix shape: {embedding_matrix.shape}")
     return embedding_matrix
 
 
@@ -481,7 +483,15 @@ def vectorize_and_add_target_dataset(
             ],
         )
 
-    return dataset.unbatch().map(tf_vectorize_sentence).batch(batch_size)
+    return (
+        dataset.unbatch()
+        .map(
+            tf_vectorize_sentence,
+            num_parallel_calls=tf.data.AUTOTUNE,
+            deterministic=False,
+        )
+        .batch(batch_size)
+    )
 
 
 def main():
@@ -522,8 +532,10 @@ def main():
     vectorization_layer = prepare_vectorization_layer(
         train_dataset, args.vocab_size, args.max_text_length
     )
+    word_index = get_word_index(vectorization_layer)
+    logging.info(f"Word index size: {len(word_index)}")
     embedding_matrix = generate_embedding_matrix(
-        vectorization_layer, args.vocab_size, args.embedding_dimensions
+        word_index, args.vocab_size, args.embedding_dimensions
     )
 
     train_dataset = vectorize_and_add_target_dataset(

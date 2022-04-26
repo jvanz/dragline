@@ -46,7 +46,9 @@ class WikipediaDataset(tf.data.Dataset):
             deterministic=False,
         )
         dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-        dataset = dataset.batch(batch_size).map(decode_fn)
+        dataset = dataset.batch(batch_size).map(
+            decode_fn, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False
+        )
         if has_cache_enable():
             dataset.cache(get_cache_dir(data_dir, f"cache_load_data"))
         return dataset
