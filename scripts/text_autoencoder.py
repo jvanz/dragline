@@ -19,10 +19,9 @@ PADDING_TOKEN = "<PAD>"
 UNK_TOKEN = "[UNK]"
 
 
-def get_checkpoint_dir(model, name):
-    checkpoint_dir = f"{os.getcwd()}/checkpoints/{name}"
+def create_checkpoint_dir(checkpoint_dir, model_name):
     os.makedirs(checkpoint_dir, exist_ok=True)
-    return checkpoint_dir
+    os.makedirs(str(checkpoint_dir) + f"/{model_name}", exist_ok=True)
 
 
 def create_model(
@@ -111,6 +110,20 @@ def create_model(
     return model
 
 
+def get_latest_checkpoint(checkpoint_dir, model_name):
+    checkpoint_dir = str(checkpoint_dir) + f"/{model_name}"
+    try:
+        checkpoints = [
+            checkpoint_dir + "/" + name for name in os.listdir(checkpoint_dir)
+        ]
+        if checkpoints:
+            latest_checkpoint = max(checkpoints, key=os.path.getctime)
+            return latest_checkpoint
+    except Exception as err:
+        logging.warning(err)
+    return None
+
+
 def create_or_load_model(
     embedding_matrix,
     dimensoes_espaco_latent,
@@ -124,22 +137,29 @@ def create_or_load_model(
     model_name,
     learning_rate,
     vocab_size,
+    from_scratch,
+    checkpoint_dir,
 ):
-    # TODO - load model from checkpoint
-    model = create_model(
-        embedding_matrix,
-        dimensoes_espaco_latent,
-        rnn_type,
-        hidden_layers_count,
-        max_text_length,
-        embedding_dimensions,
-        dropout,
-        bidirectional,
-        activation,
-        model_name,
-        learning_rate,
-        vocab_size,
-    )
+    latest_checkpoint = get_latest_checkpoint(checkpoint_dir, model_name)
+    if from_scratch or latest_checkpoint is None:
+        print("Creating a new model")
+        model = create_model(
+            embedding_matrix,
+            dimensoes_espaco_latent,
+            rnn_type,
+            hidden_layers_count,
+            max_text_length,
+            embedding_dimensions,
+            dropout,
+            bidirectional,
+            activation,
+            model_name,
+            learning_rate,
+            vocab_size,
+        )
+    else:
+        print("Restoring from", latest_checkpoint)
+        model = keras.models.load_model(latest_checkpoint)
     model.summary()
     return model
 
@@ -154,16 +174,36 @@ def save_model(model, model_path: str):
     )
 
 
-def train_model(model, train_dataset, validation_dataset, epochs, model_name, patience):
+def train_model(
+    model,
+    train_dataset,
+    validation_dataset,
+    epochs,
+    model_name,
+    patience,
+    checkpoint_dir,
+):
     logging.info("Training model...")
-    checkpoint_dir = get_checkpoint_dir(model, model_name)
-    logging.info(f"Checkpoint dir: {checkpoint_dir}")
+    create_checkpoint_dir(checkpoint_dir, model_name)
+    logging.info(f"Checkpoint dir: {checkpoint_dir}/{model_name}")
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-        filepath=checkpoint_dir,
+        filepath=str(checkpoint_dir)
+        + f"/{model_name}/model/{model_name}"
+        + "epoch.{epoch:04d}",
         save_weights_only=False,
         monitor="val_loss",
         mode="min",
         save_best_only=True,
+    )
+    model_weights_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=str(checkpoint_dir)
+        + f"/{model_name}/"
+        + "weights.{epoch:02d}-{loss:.6f}",
+        save_weights_only=False,
+        monitor="loss",
+        mode="min",
+        save_best_only=True,
+        save_freq=patience,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
         monitor="val_loss", mode="min", patience=patience, restore_best_weights=True,
@@ -176,7 +216,8 @@ def train_model(model, train_dataset, validation_dataset, epochs, model_name, pa
         validation_data=validation_dataset,
         epochs=epochs,
         callbacks=[
-            model_checkpoint_callback,
+            # model_checkpoint_callback,
+            model_weights_checkpoint_callback,
             early_stop_callback,
             tb_callback,
             nan_callback,
@@ -377,6 +418,12 @@ def command_line_args():
         help="Predict some text with the model saved at --save-model-at",
     )
     parser.add_argument(
+        "--from-scratch",
+        required=False,
+        action="store_true",
+        help="Start a training from scratch",
+    )
+    parser.add_argument(
         "--save-model-at",
         required=False,
         type=pathlib.Path,
@@ -413,6 +460,13 @@ def command_line_args():
     )
     parser.add_argument("--activation", required=False, type=str, default="relu")
     parser.add_argument("--learning-rate", required=False, type=float, default=0.001)
+    parser.add_argument(
+        "--checkpoint-dir",
+        required=False,
+        type=pathlib.Path,
+        default="checkpoints",
+        help="",
+    )
 
     args = parser.parse_args()
     args.embedding_file = str(args.embedding_file)
@@ -496,7 +550,7 @@ def vectorize_and_add_target_dataset(
 
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     args = command_line_args()
     logging.debug("##########################################")
     logging.debug(args)
@@ -566,16 +620,16 @@ def main():
     logging.info(eval_dataset.element_spec)
     logging.info(test_dataset.element_spec)
 
-    sentences = list(train_dataset.unbatch().take(5))
-    for inputt, output in sentences:
-        strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
-        print(" ".join(strs))
-        emnsentence = []
-        for i, emb in enumerate(output.numpy()):
-            assert np.array_equal(emb, embedding_matrix[inputt[i]])
-            matches = embeddingmodel.similar_by_vector(emb)
-            emnsentence.append(matches[0][0])
-        print(" ".join(emnsentence))
+    # sentences = list(train_dataset.unbatch().take(5))
+    # for inputt, output in sentences:
+    #    strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
+    #    print(" ".join(strs))
+    #    emnsentence = []
+    #    for i, emb in enumerate(output.numpy()):
+    #        assert np.array_equal(emb, embedding_matrix[inputt[i]])
+    #        matches = embeddingmodel.similar_by_vector(emb)
+    #        emnsentence.append(matches[0][0])
+    #    print(" ".join(emnsentence))
 
     if args.train:
         model = create_or_load_model(
@@ -591,6 +645,8 @@ def main():
             args.model_name,
             args.learning_rate,
             args.vocab_size,
+            args.from_scratch,
+            args.checkpoint_dir,
         )
         train_model(
             model,
@@ -599,6 +655,7 @@ def main():
             args.epochs,
             args.model_name,
             args.patience,
+            args.checkpoint_dir,
         )
         if args.save_model_at:
             save_model(model, args.save_model_at)
