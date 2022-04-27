@@ -40,13 +40,13 @@ def create_model(
 ):
     logging.info("Creating model...")
 
-    encoder_input = tf.keras.layers.Input(shape=(max_text_length,), dtype="int64")
-    embedding = tf.keras.layers.Embedding(
-        vocab_size,
-        embedding_dimensions,
-        embeddings_initializer=tf.keras.initializers.Constant(embedding_matrix),
-        trainable=False,
-    )(encoder_input)
+    encoder_input = tf.keras.layers.Input(shape=(max_text_length, embedding_dimensions))
+    # embedding = tf.keras.layers.Embedding(
+    #    vocab_size,
+    #    embedding_dimensions,
+    #    embeddings_initializer=tf.keras.initializers.Constant(embedding_matrix),
+    #    trainable=False,
+    # )(encoder_input)
     layer = None
     if rnn_type == "lstm":
         layer = tf.keras.layers.LSTM(
@@ -58,9 +58,9 @@ def create_model(
         )
     encoder = None
     if bidirectional:
-        encoder = tf.keras.layers.Bidirectional(layer, merge_mode="sum")(embedding)
+        encoder = tf.keras.layers.Bidirectional(layer, merge_mode="sum")(encoder_input)
     else:
-        encoder = layer(embedding)
+        encoder = layer(encoder_input)
 
     decoder = tf.keras.layers.RepeatVector(max_text_length, name="repeater")(encoder)
     if rnn_type == "lstm":
@@ -225,7 +225,17 @@ def train_model(
     )
 
 
-def gen_word_sequence(data_dir, batch_size, num_parallel_calls):
+def padding_truncate_sentence(sentence, max_text_length):
+    if len(sentence) > max_text_length:
+        sentence = sentence[:max_text_length]
+    if len(sentence) < max_text_length:
+        for _ in range(max_text_length - len(sentence)):
+            sentence.append(PADDING_TOKEN)
+    assert len(sentence) == max_text_length
+    return sentence
+
+
+def gen_word_sequence(data_dir, batch_size, num_parallel_calls, max_text_length):
     train_dataset = WikipediaDataset(
         data_dir.decode("utf-8"),
         parallel_file_read=num_parallel_calls,
@@ -233,25 +243,21 @@ def gen_word_sequence(data_dir, batch_size, num_parallel_calls):
     )
     for batch in train_dataset.as_numpy_iterator():
         for sentence in batch:
-            yield tf.keras.preprocessing.text.text_to_word_sequence(
+            sentence = tf.keras.preprocessing.text.text_to_word_sequence(
                 sentence.decode("utf-8")
             )
+            sentence = padding_truncate_sentence(sentence, max_text_length)
+            yield sentence
 
 
 def gen_embedded_dataset(data_dir, batch_size, max_text_length, num_parallel_calls):
-    for sentence in gen_word_sequence(data_dir, batch_size, num_parallel_calls):
+    for sentence in gen_word_sequence(data_dir, batch_size, num_parallel_calls, max_text_length):
         embedding_sentence = []
         for word in sentence:
             if word in embeddingmodel:
                 embedding_sentence.append(embeddingmodel.get_vector(word))
             else:
                 embedding_sentence.append(embeddingmodel.get_vector(UNK_TOKEN))
-        if len(embedding_sentence) > max_text_length:
-            embedding_sentence = embedding_sentence[:max_text_length]
-        if len(embedding_sentence) < max_text_length:
-            for _ in range(max_text_length - len(embedding_sentence)):
-                embedding_sentence.append(embeddingmodel.get_vector(PADDING_TOKEN))
-        assert len(embedding_sentence) == max_text_length
         yield embedding_sentence
 
 
@@ -571,53 +577,60 @@ def main():
     # add 2 to cover unk and pad tokens
     args.vocab_size += 2
 
-    train_dataset, eval_dataset, test_dataset = load_dataset(
+    train_dataset, eval_dataset, test_dataset = load_embedded_dataset(
         args.dataset_dir,
         args.batch_size,
         args.max_text_length,
         args.embedding_dimensions,
         args.num_parallel_calls,
     )
+    # train_dataset, eval_dataset, test_dataset = load_dataset(
+    #    args.dataset_dir,
+    #    args.batch_size,
+    #    args.max_text_length,
+    #    args.embedding_dimensions,
+    #    args.num_parallel_calls,
+    # )
     logging.info(train_dataset.element_spec)
     logging.info(eval_dataset.element_spec)
     logging.info(test_dataset.element_spec)
 
-    vectorization_layer = prepare_vectorization_layer(
-        train_dataset, args.vocab_size, args.max_text_length
-    )
-    word_index = get_word_index(vectorization_layer)
-    logging.info(f"Word index size: {len(word_index)}")
-    embedding_matrix = generate_embedding_matrix(
-        word_index, args.vocab_size, args.embedding_dimensions
-    )
+    # vectorization_layer = prepare_vectorization_layer(
+    #    train_dataset, args.vocab_size, args.max_text_length
+    # )
+    # word_index = get_word_index(vectorization_layer)
+    # logging.info(f"Word index size: {len(word_index)}")
+    # embedding_matrix = generate_embedding_matrix(
+    #    word_index, args.vocab_size, args.embedding_dimensions
+    # )
 
-    train_dataset = vectorize_and_add_target_dataset(
-        train_dataset,
-        args.max_text_length,
-        vectorization_layer,
-        embedding_matrix,
-        args.batch_size,
-        args.embedding_dimensions,
-    )
-    eval_dataset = vectorize_and_add_target_dataset(
-        eval_dataset,
-        args.max_text_length,
-        vectorization_layer,
-        embedding_matrix,
-        args.batch_size,
-        args.embedding_dimensions,
-    )
-    test_dataset = vectorize_and_add_target_dataset(
-        test_dataset,
-        args.max_text_length,
-        vectorization_layer,
-        embedding_matrix,
-        args.batch_size,
-        args.embedding_dimensions,
-    )
-    logging.info(train_dataset.element_spec)
-    logging.info(eval_dataset.element_spec)
-    logging.info(test_dataset.element_spec)
+    # train_dataset = vectorize_and_add_target_dataset(
+    #    train_dataset,
+    #    args.max_text_length,
+    #    vectorization_layer,
+    #    embedding_matrix,
+    #    args.batch_size,
+    #    args.embedding_dimensions,
+    # )
+    # eval_dataset = vectorize_and_add_target_dataset(
+    #    eval_dataset,
+    #    args.max_text_length,
+    #    vectorization_layer,
+    #    embedding_matrix,
+    #    args.batch_size,
+    #    args.embedding_dimensions,
+    # )
+    # test_dataset = vectorize_and_add_target_dataset(
+    #    test_dataset,
+    #    args.max_text_length,
+    #    vectorization_layer,
+    #    embedding_matrix,
+    #    args.batch_size,
+    #    args.embedding_dimensions,
+    # )
+    # logging.info(train_dataset.element_spec)
+    # logging.info(eval_dataset.element_spec)
+    # logging.info(test_dataset.element_spec)
 
     # sentences = list(train_dataset.unbatch().take(5))
     # for inputt, output in sentences:
@@ -632,7 +645,7 @@ def main():
 
     if args.train:
         model = create_or_load_model(
-            embedding_matrix,
+            np.zeros((1,1)),
             args.dimensoes_espaco_latent,
             args.rnn_type,
             args.hidden_layers_count,
