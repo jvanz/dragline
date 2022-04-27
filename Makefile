@@ -117,6 +117,7 @@ update-conda-env:
 	conda env export -n $(ENV_NAME) > $(ENV_NAME)_env.yml
 
 .PHONY: train-lstm-autoencoder
+train-lstm-autoencoder: VOCAB_SIZE=12400
 train-lstm-autoencoder:
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
 		--rnn-type lstm \
@@ -129,7 +130,7 @@ train-lstm-autoencoder:
 		--model-name lstm-autoencoder \
 		--save-model-at models/lstm-autoencoder \
 		--bidirectional-hidden-layers \
-		--vocab-size 12400 \
+		--vocab-size $(VOCAB_SIZE) \
 		--train	--predict --evaluate 
 	
 .PHONY: train-gru-autoencoder

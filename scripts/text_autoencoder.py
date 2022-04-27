@@ -203,7 +203,7 @@ def train_model(
         monitor="loss",
         mode="min",
         save_best_only=True,
-        save_freq=patience,
+        save_freq=100,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
         monitor="val_loss", mode="min", patience=patience, restore_best_weights=True,
@@ -288,7 +288,7 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .prefetch(8)
+        .prefetch(tf.data.AUTOTUNE)
     )
     test_dataset = (
         tf.data.Dataset.from_generator(
@@ -305,7 +305,7 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .prefetch(8)
+        .prefetch(tf.data.AUTOTUNE)
     )
     eval_dataset = (
         tf.data.Dataset.from_generator(
@@ -322,7 +322,7 @@ def load_embedded_dataset(
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .prefetch(8)
+        .prefetch(tf.data.AUTOTUNE)
     )
     return train_dataset, eval_dataset, test_dataset
 
@@ -335,13 +335,13 @@ def load_dataset(
 
     train_dataset = WikipediaDataset(
         f"{dataset_dir}/train", batch_size=batch_size
-    ).prefetch(batch_size)
+    ).prefetch(tf.data.AUTOTUNE)
     eval_dataset = WikipediaDataset(
         f"{dataset_dir}/evaluation", batch_size=batch_size
-    ).prefetch(batch_size)
+    ).prefetch(tf.data.AUTOTUNE)
     test_dataset = WikipediaDataset(
         f"{dataset_dir}/test", batch_size=batch_size
-    ).prefetch(batch_size)
+    ).prefetch(tf.data.AUTOTUNE)
     return train_dataset, eval_dataset, test_dataset
 
 
@@ -551,6 +551,8 @@ def vectorize_and_add_target_dataset(
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.DEBUG)
+    gpu_count = len(tf.config.list_physical_devices("GPU"))
+    logging.info(f"Números de GPUs disponíveis: {gpu_count}")
     args = command_line_args()
     logging.debug("##########################################")
     logging.debug(args)
@@ -568,9 +570,6 @@ def main():
     )
     # add 2 to cover unk and pad tokens
     args.vocab_size += 2
-
-    gpu_count = len(tf.config.list_physical_devices("GPU"))
-    logging.info(f"Números de GPUs disponíveis: {gpu_count}")
 
     train_dataset, eval_dataset, test_dataset = load_dataset(
         args.dataset_dir,
