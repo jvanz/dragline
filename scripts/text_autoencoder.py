@@ -251,7 +251,9 @@ def gen_word_sequence(data_dir, batch_size, num_parallel_calls, max_text_length)
 
 
 def gen_embedded_dataset(data_dir, batch_size, max_text_length, num_parallel_calls):
-    for sentence in gen_word_sequence(data_dir, batch_size, num_parallel_calls, max_text_length):
+    for sentence in gen_word_sequence(
+        data_dir, batch_size, num_parallel_calls, max_text_length
+    ):
         embedding_sentence = []
         for word in sentence:
             if word in embeddingmodel:
@@ -645,7 +647,7 @@ def main():
 
     if args.train:
         model = create_or_load_model(
-            np.zeros((1,1)),
+            np.zeros((1, 1)),
             args.dimensoes_espaco_latent,
             args.rnn_type,
             args.hidden_layers_count,

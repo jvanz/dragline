@@ -134,6 +134,7 @@ train-lstm-autoencoder:
 		--train	--predict --evaluate 
 	
 .PHONY: train-gru-autoencoder
+train-gru-autoencoder: VOCAB_SIZE=12400
 train-gru-autoencoder:
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
 		--rnn-type gru \
@@ -146,7 +147,7 @@ train-gru-autoencoder:
 		--model-name gru-autoencoder \
 		--save-model-at models/gru-autoencoder \
 		--bidirectional-hidden-layers \
-		--vocab-size 12400 \
+		--vocab-size $(VOCAB_SIZE) \
 		--predict --evaluate --train 
 
 
