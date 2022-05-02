@@ -63,7 +63,10 @@ def create_model():
     )
     decoder = tf.keras.layers.Dropout(0.2, name="decoder1")(decoder)
     decoder = tf.keras.layers.Bidirectional(
-        tf.keras.layers.GRU(units=DIMENSOES_ESPACO_LATENTE, return_sequences=True,),
+        tf.keras.layers.GRU(
+            units=DIMENSOES_ESPACO_LATENTE,
+            return_sequences=True,
+        ),
         name="decoder2",
     )(decoder)
     decoder = tf.keras.layers.Dense(VOCAB_SIZE, activation="softmax", name="decoder4")(

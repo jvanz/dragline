@@ -22,7 +22,7 @@ MODEL_PATH ?= "$(PWD)/models"
 VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
 VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
-WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
+WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia_embeddings"
 PATIENCE ?= 20
 LEARNING_RATE ?= 0.00001
 
@@ -131,8 +131,8 @@ train-lstm-autoencoder:
 		--save-model-at models/lstm-autoencoder \
 		--bidirectional-hidden-layers \
 		--vocab-size $(VOCAB_SIZE) \
-		--train	--predict --evaluate 
-	
+		--train --predict --evaluate
+
 .PHONY: train-gru-autoencoder
 train-gru-autoencoder: VOCAB_SIZE=12400
 train-gru-autoencoder:
@@ -148,7 +148,7 @@ train-gru-autoencoder:
 		--save-model-at models/gru-autoencoder \
 		--bidirectional-hidden-layers \
 		--vocab-size $(VOCAB_SIZE) \
-		--predict --evaluate --train 
+		--predict --evaluate --train
 
 
 .PHONY: train-transformer-autoencoder
@@ -207,3 +207,11 @@ download-word-embeddings:
 	mkdir -p $(DATA_DIR)/embeddings
 	curl -o $(DATA_DIR)/embeddings/glove_s50.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s50.zip
 	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s50.zip
+	curl -o $(DATA_DIR)/embeddings/glove_s100.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s100.zip
+	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s100.zip
+	curl -o $(DATA_DIR)/embeddings/glove_s300.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s300.zip
+	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s300.zip
+	curl -o $(DATA_DIR)/embeddings/glove_s600.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s600.zip
+	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s600.zip
+	curl -o $(DATA_DIR)/embeddings/glove_s1000.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s1000.zip
+	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s1000.zip

@@ -25,7 +25,6 @@ def create_checkpoint_dir(checkpoint_dir, model_name):
 
 
 def create_model(
-    embedding_matrix,
     dimensoes_espaco_latent,
     rnn_type,
     hidden_layers_count,
@@ -36,17 +35,10 @@ def create_model(
     activation,
     model_name,
     learning_rate,
-    vocab_size,
 ):
     logging.info("Creating model...")
 
     encoder_input = tf.keras.layers.Input(shape=(max_text_length, embedding_dimensions))
-    # embedding = tf.keras.layers.Embedding(
-    #    vocab_size,
-    #    embedding_dimensions,
-    #    embeddings_initializer=tf.keras.initializers.Constant(embedding_matrix),
-    #    trainable=False,
-    # )(encoder_input)
     layer = None
     if rnn_type == "lstm":
         layer = tf.keras.layers.LSTM(
@@ -104,7 +96,7 @@ def create_model(
 
     loss = tf.keras.losses.MeanSquaredError()
     optimizer = tf.keras.optimizers.Adam(learning_rate)
-    # metrics = [tf.keras.metrics.MeanSquaredError()]
+    metrics = [tf.keras.metrics.MeanSquaredError()]
 
     model.compile(loss=loss, optimizer=optimizer)
     return model
@@ -125,7 +117,6 @@ def get_latest_checkpoint(checkpoint_dir, model_name):
 
 
 def create_or_load_model(
-    embedding_matrix,
     dimensoes_espaco_latent,
     rnn_type,
     hidden_layers_count,
@@ -136,7 +127,6 @@ def create_or_load_model(
     activation,
     model_name,
     learning_rate,
-    vocab_size,
     from_scratch,
     checkpoint_dir,
 ):
@@ -144,7 +134,6 @@ def create_or_load_model(
     if from_scratch or latest_checkpoint is None:
         print("Creating a new model")
         model = create_model(
-            embedding_matrix,
             dimensoes_espaco_latent,
             rnn_type,
             hidden_layers_count,
@@ -155,7 +144,6 @@ def create_or_load_model(
             activation,
             model_name,
             learning_rate,
-            vocab_size,
         )
     else:
         print("Restoring from", latest_checkpoint)
@@ -189,7 +177,7 @@ def train_model(
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=str(checkpoint_dir)
         + f"/{model_name}/model/{model_name}"
-        + "epoch.{epoch:04d}",
+        + "epoch.{epoch:06d}",
         save_weights_only=False,
         monitor="val_loss",
         mode="min",
@@ -198,15 +186,18 @@ def train_model(
     model_weights_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=str(checkpoint_dir)
         + f"/{model_name}/"
-        + "weights.{epoch:02d}-{loss:.6f}",
+        + "weights.{epoch:06d}-{loss:.6f}",
         save_weights_only=False,
         monitor="loss",
         mode="min",
         save_best_only=True,
-        save_freq=100,
+        save_freq=1000,
     )
     early_stop_callback = tf.keras.callbacks.EarlyStopping(
-        monitor="val_loss", mode="min", patience=patience, restore_best_weights=True,
+        monitor="val_loss",
+        mode="min",
+        patience=patience,
+        restore_best_weights=True,
     )
     tb_callback = tf.keras.callbacks.TensorBoard("./logs", update_freq=1)
     nan_callback = tf.keras.callbacks.TerminateOnNaN()
@@ -216,7 +207,7 @@ def train_model(
         validation_data=validation_dataset,
         epochs=epochs,
         callbacks=[
-            # model_checkpoint_callback,
+            model_checkpoint_callback,
             model_weights_checkpoint_callback,
             early_stop_callback,
             tb_callback,
@@ -225,146 +216,31 @@ def train_model(
     )
 
 
-def padding_truncate_sentence(sentence, max_text_length):
-    if len(sentence) > max_text_length:
-        sentence = sentence[:max_text_length]
-    if len(sentence) < max_text_length:
-        for _ in range(max_text_length - len(sentence)):
-            sentence.append(PADDING_TOKEN)
-    assert len(sentence) == max_text_length
-    return sentence
-
-
-def gen_word_sequence(data_dir, batch_size, num_parallel_calls, max_text_length):
-    train_dataset = WikipediaDataset(
-        data_dir.decode("utf-8"),
-        parallel_file_read=num_parallel_calls,
-        batch_size=batch_size,
-    )
-    for batch in train_dataset.as_numpy_iterator():
-        for sentence in batch:
-            sentence = tf.keras.preprocessing.text.text_to_word_sequence(
-                sentence.decode("utf-8")
-            )
-            sentence = padding_truncate_sentence(sentence, max_text_length)
-            yield sentence
-
-
-def gen_embedded_dataset(data_dir, batch_size, max_text_length, num_parallel_calls):
-    for sentence in gen_word_sequence(
-        data_dir, batch_size, num_parallel_calls, max_text_length
-    ):
-        embedding_sentence = []
-        for word in sentence:
-            if word in embeddingmodel:
-                embedding_sentence.append(embeddingmodel.get_vector(word))
-            else:
-                embedding_sentence.append(embeddingmodel.get_vector(UNK_TOKEN))
-        yield embedding_sentence
-
-
-def convert_embedding_sentence_to_string_sentence(sentence):
-    strsentence = []
-    for emb in sentence:
-        word = embeddingmodel.similar_by_vector(emb)[0][0]
-        strsentence.append(word)
-    return " ".join(strsentence)
-
-
-def add_target(sentence):
-    return (sentence, sentence)
-
-
-def load_embedded_dataset(
-    dataset_dir: str, batch_size, max_text_length, embedding_dim, num_parallel_calls
-):
-    logging.info("Loading datasets...")
-    metadata = load_wikipedia_metadata(dataset_dir)
-
-    train_dataset = (
-        tf.data.Dataset.from_generator(
-            gen_embedded_dataset,
-            output_signature=(
-                tf.TensorSpec(shape=(max_text_length, embedding_dim), dtype=tf.float32)
-            ),
-            args=(
-                f"{dataset_dir}/train",
-                batch_size,
-                max_text_length,
-                num_parallel_calls,
-            ),
-        )
-        .batch(batch_size)
-        .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .prefetch(tf.data.AUTOTUNE)
-    )
-    test_dataset = (
-        tf.data.Dataset.from_generator(
-            gen_embedded_dataset,
-            output_signature=(
-                tf.TensorSpec(shape=(max_text_length, embedding_dim), dtype=tf.float32)
-            ),
-            args=(
-                f"{dataset_dir}/test",
-                batch_size,
-                max_text_length,
-                num_parallel_calls,
-            ),
-        )
-        .batch(batch_size)
-        .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .prefetch(tf.data.AUTOTUNE)
-    )
-    eval_dataset = (
-        tf.data.Dataset.from_generator(
-            gen_embedded_dataset,
-            output_signature=(
-                tf.TensorSpec(shape=(max_text_length, embedding_dim), dtype=tf.float32)
-            ),
-            args=(
-                f"{dataset_dir}/evaluation",
-                batch_size,
-                max_text_length,
-                num_parallel_calls,
-            ),
-        )
-        .batch(batch_size)
-        .map(add_target, num_parallel_calls=num_parallel_calls, deterministic=False,)
-        .prefetch(tf.data.AUTOTUNE)
-    )
-    return train_dataset, eval_dataset, test_dataset
-
-
 def load_dataset(
     dataset_dir: str, batch_size, max_text_length, embedding_dim, num_parallel_calls
 ):
     logging.info("Loading datasets...")
-    metadata = load_wikipedia_metadata(dataset_dir)
 
-    train_dataset = WikipediaDataset(
+    train_dataset = TextAutoencoderWikipediaDataset(
         f"{dataset_dir}/train", batch_size=batch_size
     ).prefetch(tf.data.AUTOTUNE)
-    eval_dataset = WikipediaDataset(
+    eval_dataset = TextAutoencoderWikipediaDataset(
         f"{dataset_dir}/evaluation", batch_size=batch_size
     ).prefetch(tf.data.AUTOTUNE)
-    test_dataset = WikipediaDataset(
+    test_dataset = TextAutoencoderWikipediaDataset(
         f"{dataset_dir}/test", batch_size=batch_size
     ).prefetch(tf.data.AUTOTUNE)
     return train_dataset, eval_dataset, test_dataset
-
-
-def compare_original_and_generated_sentences(inputs, predictions):
-    for inputt, prediction in zip(inputs.unbatch().as_numpy_iterator(), predictions):
-        inputt = convert_embedding_sentence_to_string_sentence(inputt)
-        prediction = convert_embedding_sentence_to_string_sentence(prediction)
-        logging.info(f"{inputt} -> {prediction}")
 
 
 def evaluate_model(dataset, model_path):
     logging.info(f"Loading model {model_path}")
     model = tf.keras.models.load_model(model_path, compile=True)
     model.summary()
-    results = model.evaluate(dataset, return_dict=True,)
+    results = model.evaluate(
+        dataset,
+        return_dict=True,
+    )
     print()
     print(f"Loaded model evaluation: {results}")
     print()
@@ -411,7 +287,10 @@ def command_line_args():
         help="The number of hidden layers in the encoder and decoder ",
     )
     parser.add_argument(
-        "--train", required=False, action="store_true", help="Train model from scratch",
+        "--train",
+        required=False,
+        action="store_true",
+        help="Train model from scratch",
     )
     parser.add_argument(
         "--evaluate",
@@ -438,19 +317,32 @@ def command_line_args():
         help="Save model after training in the defined path",
     )
     parser.add_argument(
-        "--embedding-file", required=True, type=pathlib.Path, help="",
+        "--embedding-file",
+        required=True,
+        type=pathlib.Path,
+        help="",
     )
     parser.add_argument(
-        "--embedding-dimensions", required=True, type=int, help="",
+        "--embedding-dimensions",
+        required=True,
+        type=int,
+        help="",
     )
     parser.add_argument(
-        "--vocab-size", required=False, type=int, default=10000, help="",
+        "--vocab-size",
+        required=False,
+        type=int,
+        default=10000,
+        help="",
     )
     parser.add_argument(
         "--dimensoes-espaco-latent", required=False, type=int, default=256
     )
     parser.add_argument(
-        "--bidirectional-hidden-layers", required=False, action="store_true", help="",
+        "--bidirectional-hidden-layers",
+        required=False,
+        action="store_true",
+        help="",
     )
     parser.add_argument("--max-text-length", required=False, type=int, default=40)
     parser.add_argument("--batch-size", required=False, type=int, default=32)
@@ -461,10 +353,17 @@ def command_line_args():
     )
     parser.add_argument("--dropout", required=False, type=float, default=0.2)
     parser.add_argument(
-        "--model-name", required=False, type=str, default="autoencoder", help="",
+        "--model-name",
+        required=False,
+        type=str,
+        default="autoencoder",
+        help="",
     )
     parser.add_argument(
-        "--dataset-dir", required=True, type=pathlib.Path, help="",
+        "--dataset-dir",
+        required=True,
+        type=pathlib.Path,
+        help="",
     )
     parser.add_argument("--activation", required=False, type=str, default="relu")
     parser.add_argument("--learning-rate", required=False, type=float, default=0.001)
@@ -481,81 +380,6 @@ def command_line_args():
     return args
 
 
-def prepare_vectorization_layer(train_dataset, vocab_size, max_text_length):
-    logging.info("Vectorizing dataset...")
-    vectorization_layer = tf.keras.layers.TextVectorization(
-        vocab_size, output_sequence_length=max_text_length, pad_to_max_tokens=True
-    )
-    vectorization_layer.adapt(train_dataset)
-    return vectorization_layer
-
-
-def get_word_index(vectorization_layer):
-    voc = vectorization_layer.get_vocabulary()
-    return dict(zip(voc, range(len(voc))))
-
-
-def generate_embedding_matrix(word_index, vocab_size, embedding_dimensions):
-    logging.info("Building embedding matrix")
-    embedding_matrix = np.zeros((vocab_size, embedding_dimensions))
-    hits = 0
-    misses = 0
-
-    for word, i in word_index.items():
-        if i == 0:
-            embedding_matrix[i] = embeddingmodel.get_vector(PADDING_TOKEN)
-        elif i == 1:
-            embedding_matrix[i] = embeddingmodel.get_vector(UNK_TOKEN)
-        elif word in embeddingmodel:
-            # Words not found in embedding index will be all-zeros.
-            # This includes the representation for "padding" and "OOV"
-            embedding_matrix[i] = embeddingmodel.get_vector(word)
-            hits += 1
-        else:
-            misses += 1
-    logging.info("Converted %d words (%d misses)" % (hits, misses))
-    logging.info(f"Embedding matrix shape: {embedding_matrix.shape}")
-    return embedding_matrix
-
-
-def vectorize_and_add_target_dataset(
-    dataset,
-    max_text_length,
-    vectorization_layer,
-    embedding_matrix,
-    batch_size,
-    embedding_dimensions,
-):
-    def vectorize_sentence(sentence):
-        sentence = vectorization_layer(sentence)
-        embsentence = []
-        for word in sentence:
-            embsentence.append(embedding_matrix[word])
-        return sentence, embsentence
-
-    def tf_vectorize_sentence(text):
-        return tf.py_function(
-            vectorize_sentence,
-            [text],
-            [
-                tf.TensorSpec(shape=(max_text_length,), dtype=tf.int64),
-                tf.TensorSpec(
-                    shape=(max_text_length, embedding_dimensions,), dtype=tf.float32
-                ),
-            ],
-        )
-
-    return (
-        dataset.unbatch()
-        .map(
-            tf_vectorize_sentence,
-            num_parallel_calls=tf.data.AUTOTUNE,
-            deterministic=False,
-        )
-        .batch(batch_size)
-    )
-
-
 def main():
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     logging.basicConfig(level=logging.DEBUG)
@@ -566,88 +390,19 @@ def main():
     logging.debug(args)
     logging.debug("##########################################")
 
-    global embeddingmodel
-    embeddingmodel = KeyedVectors.load_word2vec_format(
-        args.embedding_file, limit=args.vocab_size
-    )
-    embeddingmodel.add_vector(
-        PADDING_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
-    )
-    embeddingmodel.add_vector(
-        UNK_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
-    )
-    # add 2 to cover unk and pad tokens
-    args.vocab_size += 2
-
-    train_dataset, eval_dataset, test_dataset = load_embedded_dataset(
+    train_dataset, eval_dataset, test_dataset = load_dataset(
         args.dataset_dir,
         args.batch_size,
         args.max_text_length,
         args.embedding_dimensions,
         args.num_parallel_calls,
     )
-    # train_dataset, eval_dataset, test_dataset = load_dataset(
-    #    args.dataset_dir,
-    #    args.batch_size,
-    #    args.max_text_length,
-    #    args.embedding_dimensions,
-    #    args.num_parallel_calls,
-    # )
     logging.info(train_dataset.element_spec)
     logging.info(eval_dataset.element_spec)
     logging.info(test_dataset.element_spec)
 
-    # vectorization_layer = prepare_vectorization_layer(
-    #    train_dataset, args.vocab_size, args.max_text_length
-    # )
-    # word_index = get_word_index(vectorization_layer)
-    # logging.info(f"Word index size: {len(word_index)}")
-    # embedding_matrix = generate_embedding_matrix(
-    #    word_index, args.vocab_size, args.embedding_dimensions
-    # )
-
-    # train_dataset = vectorize_and_add_target_dataset(
-    #    train_dataset,
-    #    args.max_text_length,
-    #    vectorization_layer,
-    #    embedding_matrix,
-    #    args.batch_size,
-    #    args.embedding_dimensions,
-    # )
-    # eval_dataset = vectorize_and_add_target_dataset(
-    #    eval_dataset,
-    #    args.max_text_length,
-    #    vectorization_layer,
-    #    embedding_matrix,
-    #    args.batch_size,
-    #    args.embedding_dimensions,
-    # )
-    # test_dataset = vectorize_and_add_target_dataset(
-    #    test_dataset,
-    #    args.max_text_length,
-    #    vectorization_layer,
-    #    embedding_matrix,
-    #    args.batch_size,
-    #    args.embedding_dimensions,
-    # )
-    # logging.info(train_dataset.element_spec)
-    # logging.info(eval_dataset.element_spec)
-    # logging.info(test_dataset.element_spec)
-
-    # sentences = list(train_dataset.unbatch().take(5))
-    # for inputt, output in sentences:
-    #    strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
-    #    print(" ".join(strs))
-    #    emnsentence = []
-    #    for i, emb in enumerate(output.numpy()):
-    #        assert np.array_equal(emb, embedding_matrix[inputt[i]])
-    #        matches = embeddingmodel.similar_by_vector(emb)
-    #        emnsentence.append(matches[0][0])
-    #    print(" ".join(emnsentence))
-
     if args.train:
         model = create_or_load_model(
-            np.zeros((1, 1)),
             args.dimensoes_espaco_latent,
             args.rnn_type,
             args.hidden_layers_count,
@@ -658,7 +413,6 @@ def main():
             args.activation,
             args.model_name,
             args.learning_rate,
-            args.vocab_size,
             args.from_scratch,
             args.checkpoint_dir,
         )
@@ -678,6 +432,14 @@ def main():
         evaluate_model(test_dataset, args.save_model_at)
 
     if args.predict:
+        global embeddingmodel
+        embeddingmodel = KeyedVectors.load_word2vec_format(args.embedding_file)
+        embeddingmodel.add_vector(
+            PADDING_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
+        )
+        embeddingmodel.add_vector(
+            UNK_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
+        )
         predict_text(test_dataset, args.save_model_at, vectorization_layer)
 
 

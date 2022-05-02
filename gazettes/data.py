@@ -11,13 +11,6 @@ from transformers import AutoTokenizer
 import tensorflow as tf
 
 
-def decode_fn(encoded_example):
-    return tf.io.parse_example(
-        encoded_example,
-        {"text": tf.io.FixedLenFeature([], dtype=tf.string, default_value="")},
-    )["text"]
-
-
 def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
     if not cache_subdirectory:
         raise "Missing cache subdirectory"
@@ -34,7 +27,7 @@ def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
 
 
 class WikipediaDataset(tf.data.Dataset):
-    def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=32):
+    def __new__(cls, data_dir: str, batch_size: int = 32):
         datafiles = os.listdir(data_dir)
         datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
@@ -46,11 +39,33 @@ class WikipediaDataset(tf.data.Dataset):
             deterministic=False,
         )
         dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-        dataset = dataset.batch(batch_size).map(
+
+        def decode_fn(encoded_example):
+            sample = tf.io.parse_example(
+                encoded_example,
+                {
+                    "text": tf.io.FixedLenFeature(
+                        [], dtype=tf.string, default_value=""
+                    ),
+                    "tokens": tf.io.FixedLenFeature(
+                        [], dtype=tf.string, default_value=""
+                    ),
+                    "embeddings": tf.io.FixedLenFeature(
+                        [], dtype=tf.string, default_value=""
+                    ),
+                },
+            )
+            tokens = tf.io.parse_tensor(sample["tokens"], out_type=tf.string)
+            #  TODO - get max text length (40) and embeddings dimensions (50) from function args
+            tokens = tf.ensure_shape(tokens, (40,))
+            embeddings = tf.io.parse_tensor(sample["embeddings"], out_type=tf.float32)
+            #  TODO - get max text length (40) and embeddings dimensions (50) from function args
+            embeddings = tf.ensure_shape(embeddings, (40, 50))
+            return sample["text"], tokens, embeddings
+
+        dataset = dataset.map(
             decode_fn, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False
-        )
-        if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, f"cache_load_data"))
+        ).batch(batch_size)
         return dataset
 
 
@@ -58,37 +73,21 @@ class TextAutoencoderWikipediaDataset(tf.data.Dataset):
     def __new__(
         cls,
         data_dir: str,
-        parallel_file_read: int = 4,
         batch_size: int = 32,
-        max_text_length: int = 64,
-        vocabulary: str = None,
-        vocabulary_size: int = 0,
+        max_text_length: int = 40,
         num_parallel_calls: int = tf.data.AUTOTUNE,
     ):
         dataset = WikipediaDataset(data_dir, batch_size=batch_size)
 
-        vectorize_layer = tf.keras.layers.TextVectorization(
-            output_mode="int",
-            output_sequence_length=max_text_length,
-            name="vectorization_layer",
-            vocabulary=vocabulary,
-            max_tokens=vocabulary_size,
-        )
-
-        def preprocess_text(text):
-            vectorized_text = vectorize_layer(text)
-            vectorized_target = tf.one_hot(vectorize_layer(text), vocabulary_size)
-            return (vectorized_text, vectorized_target)
+        def preprocess_text(text, tokens, embeddings):
+            return (embeddings, embeddings)
 
         dataset = dataset.map(
-            preprocess_text, num_parallel_calls=num_parallel_calls, deterministic=False,
+            preprocess_text,
+            num_parallel_calls=num_parallel_calls,
+            deterministic=False,
         )
-        if has_cache_enable():
-            dataset.cache(
-                get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),
-            )
 
-        dataset.vectorize_layer = vectorize_layer
         return dataset
 
 
@@ -106,7 +105,6 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
     def __new__(
         cls,
         data_dir: str,
-        parallel_file_read: int = 4,
         batch_size: int = 1000,
         max_text_length: int = 64,
         vocabulary: str = None,
@@ -140,10 +138,14 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                         shape=(max_text_length,), dtype=tf.int32, name="input_ids"
                     ),
                     tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="token_type_ids",
+                        shape=(max_text_length,),
+                        dtype=tf.int32,
+                        name="token_type_ids",
                     ),
                     tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
+                        shape=(max_text_length,),
+                        dtype=tf.int32,
+                        name="attention_mask",
                     ),
                     tf.TensorSpec(
                         shape=(max_text_length,), dtype=tf.int32, name="target"
@@ -151,7 +153,13 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                 ],
             )
             return [
-                tf.reshape(tensor, [max_text_length,]) for tensor in preprocessed_text
+                tf.reshape(
+                    tensor,
+                    [
+                        max_text_length,
+                    ],
+                )
+                for tensor in preprocessed_text
             ]
 
         def tf_preprocess_text(batch):
@@ -163,10 +171,14 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
                         shape=(max_text_length,), dtype=tf.int32, name="input_ids"
                     ),
                     tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="token_type_ids",
+                        shape=(max_text_length,),
+                        dtype=tf.int32,
+                        name="token_type_ids",
                     ),
                     tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
+                        shape=(max_text_length,),
+                        dtype=tf.int32,
+                        name="attention_mask",
                     ),
                     tf.TensorSpec(
                         shape=(max_text_length,), dtype=tf.int32, name="target"
@@ -180,7 +192,9 @@ class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
             deterministic=False,
         )
         if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, "transformer_preprocessing"),)
+            dataset.cache(
+                get_cache_dir(data_dir, "transformer_preprocessing"),
+            )
 
         def organize_targets(input_ids, token_type_ids, attention_mask, target):
             return (
