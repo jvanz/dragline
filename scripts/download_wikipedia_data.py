@@ -18,16 +18,13 @@ DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
 MAX_WORKERS = 10
 MINIMUM_SENTENCE_WORD_COUNT = 3
-save_csv = False
-save_raw_dataset = False
-save_embedding_dataset = True
+save_csv = True
+save_raw_dataset = True
 max_text_length = 40
 embedding_dimensions = 50
 
-EMBEDDING_DATASET = "wikipedia_embeddings"
-
 PADDING_TOKEN = "<PAD>"
-UNK_TOKEN = "[UNK]"
+UNK_TOKEN = "<unk>"
 
 VALID_SENTENCE_REGEX = r"^[\s\w,]+$"
 
@@ -262,12 +259,7 @@ def write_tfrecord_files(datasets):
 
 
 def write_embedding_tfrecord_files(datasets):
-    print("----------------------------")
-    print("Writing tokenized datasets")
-    shutil.rmtree(f"{DATA_DIR}/{EMBEDDING_DATASET}", ignore_errors=True)
-    os.makedirs(f"{DATA_DIR}/{EMBEDDING_DATASET}/train", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/{EMBEDDING_DATASET}/test", exist_ok=True)
-    os.makedirs(f"{DATA_DIR}/{EMBEDDING_DATASET}/evaluation", exist_ok=True)
+    print("Writing datasets tokenized and with embeddings")
     results = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         for dataset_split_name in datasets:
@@ -280,7 +272,7 @@ def write_embedding_tfrecord_files(datasets):
                 results.append(
                     executor.submit(
                         write_tfrecord_file,
-                        filepath=f"{DATA_DIR}/{EMBEDDING_DATASET}/{dataset_split_name}/{counter}.tfrecords",
+                        filepath=f"{DATA_DIR}/wikipedia/{dataset_split_name}/{counter}.tfrecords",
                         batch=batch,
                     )
                 )
@@ -331,6 +323,19 @@ def fit_tokenizer(datasets):
         tokenizerfile.write(tokenizer.to_json())
 
 
+def load_embeddings():
+    global embeddingmodel
+    embeddingmodel = KeyedVectors.load_word2vec_format(
+        f"{DATA_DIR}/embeddings/glove_s50.txt"
+    )
+    embeddingmodel.add_vector(PADDING_TOKEN, np.zeros((50,)))
+    embeddingmodel.save_word2vec_format(
+        f"{DATA_DIR}/wikipedia/embeddings.txt",
+        write_header=True,
+    )
+    print("Embeddings loaded.")
+
+
 def main():
 
     print(f"DATA_DIR: {DATA_DIR}")
@@ -345,22 +350,9 @@ def main():
     if save_csv:
         write_wikipedia_file(datasets)
     if save_raw_dataset:
-        write_tfrecord_files(datasets)
-    with open(f"{DATA_DIR}/wikipedia/metadata.json", "w") as metadatafile:
-        json.dump(metadata, metadatafile)
-
-    if save_embedding_dataset:
-        global embeddingmodel
-        embeddingmodel = KeyedVectors.load_word2vec_format(
-            f"{DATA_DIR}/embeddings/glove_s50.txt"
-        )
-        embeddingmodel.add_vector(PADDING_TOKEN, np.random.uniform(-1, 1, 50))
-        embeddingmodel.add_vector(UNK_TOKEN, np.random.uniform(-1, 1, 50))
-        print("Embeddings loaded.")
+        load_embeddings()
         write_embedding_tfrecord_files(datasets)
-        ds = tf.data.TFRecordDataset(
-            f"{DATA_DIR}/{EMBEDDING_DATASET}/train/0.tfrecords"
-        )
+        ds = tf.data.TFRecordDataset(f"{DATA_DIR}/wikipedia/train/0.tfrecords")
         ds = ds.map(decode_fn, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False)
         print(ds.element_spec)
         sample = list(ds.take(1))
@@ -373,6 +365,8 @@ def main():
                 ]
             )
         )
+    with open(f"{DATA_DIR}/wikipedia/metadata.json", "w") as metadatafile:
+        json.dump(metadata, metadatafile)
 
 
 if __name__ == "__main__":

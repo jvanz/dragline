@@ -120,36 +120,34 @@ update-conda-env:
 train-lstm-autoencoder: VOCAB_SIZE=12400
 train-lstm-autoencoder:
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
-		--rnn-type lstm \
-		--hidden-layers-count 1 \
-		--embedding-dimensions 50 \
-		--embedding-file "$(DATA_DIR)/embeddings/glove_s50.txt" \
-		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
-		--epochs $(EPOCHS) \
 		--batch-size $(BATCH_SIZE) \
-		--model-name lstm-autoencoder \
-		--save-model-at models/lstm-autoencoder \
 		--bidirectional-hidden-layers \
-		--vocab-size $(VOCAB_SIZE) \
+		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
+		--embedding-dimensions 50 \
+		--embedding-file "$(DATA_DIR)/wikipedia/embeddings.txt" \
+		--epochs $(EPOCHS) \
+		--hidden-layers-count 1 \
 		--learning-rate $(LEARNING_RATE) \
+		--model-name lstm-autoencoder \
+		--rnn-type lstm \
+		--save-model-at models/lstm-autoencoder \
 		--train --evaluate
 
 .PHONY: train-gru-autoencoder
 train-gru-autoencoder: VOCAB_SIZE=12400
 train-gru-autoencoder:
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
-		--rnn-type gru \
-		--hidden-layers-count 1 \
-		--embedding-dimensions 50 \
-		--embedding-file "$(DATA_DIR)/embeddings/glove_s50.txt" \
-		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
-		--epochs $(EPOCHS) \
 		--batch-size $(BATCH_SIZE) \
-		--model-name gru-autoencoder \
-		--save-model-at models/gru-autoencoder \
 		--bidirectional-hidden-layers \
-		--vocab-size $(VOCAB_SIZE) \
+		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
+		--embedding-dimensions 50 \
+		--embedding-file "$(DATA_DIR)/wikipedia/embeddings.txt" \
+		--epochs $(EPOCHS) \
+		--hidden-layers-count 1 \
 		--learning-rate $(LEARNING_RATE) \
+		--model-name gru-autoencoder \
+		--rnn-type gru \
+		--save-model-at models/gru-autoencoder \
 		--train --evaluate
 
 

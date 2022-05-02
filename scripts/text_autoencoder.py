@@ -9,14 +9,10 @@ from tensorflow import keras
 import numpy as np
 from gensim.models import KeyedVectors
 
-from gazettes.data import (
-    TextAutoencoderWikipediaDataset,
-    WikipediaDataset,
-    load_wikipedia_metadata,
-)
+from gazettes.data import TextAutoencoderWikipediaDataset
 
 PADDING_TOKEN = "<PAD>"
-UNK_TOKEN = "[UNK]"
+UNK_TOKEN = "<unk>"
 
 
 def create_checkpoint_dir(checkpoint_dir, model_name):
@@ -246,22 +242,17 @@ def evaluate_model(dataset, model_path):
     print()
 
 
-def predict_text(dataset, model_path, vectorization_layer):
+def predict_text(dataset, model_path):
     logging.info(f"Loading model {model_path}")
     model = tf.keras.models.load_model(model_path, compile=True)
     model.summary()
     dataset = dataset.map(
-        lambda inputt, target: inputt,
+        lambda inputt, output: inputt,
         num_parallel_calls=tf.data.AUTOTUNE,
         deterministic=False,
     )
 
     inputt = list(dataset.unbatch().take(1))[0]
-    print(inputt)
-    strs = [vectorization_layer.get_vocabulary()[word] for word in inputt]
-    print(" ".join(strs))
-
-    inputt = list(dataset.unbatch().batch(1).take(1))
     print(inputt)
     output = model.predict_on_batch(inputt)
     print(output)
@@ -434,13 +425,7 @@ def main():
     if args.predict:
         global embeddingmodel
         embeddingmodel = KeyedVectors.load_word2vec_format(args.embedding_file)
-        embeddingmodel.add_vector(
-            PADDING_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
-        )
-        embeddingmodel.add_vector(
-            UNK_TOKEN, np.random.uniform(-1, 1, args.embedding_dimensions)
-        )
-        predict_text(test_dataset, args.save_model_at, vectorization_layer)
+        predict_text(test_dataset, args.save_model_at)
 
 
 if __name__ == "__main__":
