@@ -131,7 +131,8 @@ train-lstm-autoencoder:
 		--save-model-at models/lstm-autoencoder \
 		--bidirectional-hidden-layers \
 		--vocab-size $(VOCAB_SIZE) \
-		--train --predict --evaluate
+		--learning-rate $(LEARNING_RATE) \
+		--train --evaluate
 
 .PHONY: train-gru-autoencoder
 train-gru-autoencoder: VOCAB_SIZE=12400
@@ -148,7 +149,8 @@ train-gru-autoencoder:
 		--save-model-at models/gru-autoencoder \
 		--bidirectional-hidden-layers \
 		--vocab-size $(VOCAB_SIZE) \
-		--predict --evaluate --train
+		--learning-rate $(LEARNING_RATE) \
+		--train --evaluate
 
 
 .PHONY: train-transformer-autoencoder
