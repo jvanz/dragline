@@ -91,10 +91,10 @@ def create_model(
     model = tf.keras.Model(encoder_input, decoder, name=model_name)
 
     loss = tf.keras.losses.MeanSquaredError()
-    optimizer = tf.keras.optimizers.Adam(learning_rate)
-    metrics = [tf.keras.metrics.MeanSquaredError()]
+    optimizer = tf.keras.optimizers.RMSprop(learning_rate)
+    metrics = [tf.keras.metrics.MeanSquaredError(), "accuracy"]
 
-    model.compile(loss=loss, optimizer=optimizer)
+    model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
     return model
 
 

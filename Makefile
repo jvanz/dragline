@@ -22,7 +22,7 @@ MODEL_PATH ?= "$(PWD)/models"
 VOCAB_FILE ?= "$(DATA_DIR)/bertimbau_base_vocab.txt"
 VOCAB_SIZE ?= $(shell cat $(VOCAB_FILE) | wc -l)
 WIKIPEDIA_DATASET_SIZE ?= 1.0
-WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia_embeddings"
+WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
 PATIENCE ?= 20
 LEARNING_RATE ?= 0.00001
 

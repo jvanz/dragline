@@ -63,9 +63,13 @@ class WikipediaDataset(tf.data.Dataset):
             embeddings = tf.ensure_shape(embeddings, (40, 50))
             return sample["text"], tokens, embeddings
 
-        dataset = dataset.map(
-            decode_fn, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False
-        ).batch(batch_size)
+        dataset = (
+            dataset.map(
+                decode_fn, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False
+            )
+            .shuffle(batch_size * 4)
+            .batch(batch_size)
+        )
         return dataset
 
 
