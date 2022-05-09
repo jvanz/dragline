@@ -74,51 +74,52 @@ def load_csv_file_column(csvfile_name: str, column: str):
 
 class WikipediaDataset(tf.data.Dataset):
     def __new__(cls, data_dir: str, batch_size: int = 32):
-        # datafiles = os.listdir(data_dir)
-        # datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
-        # datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
-        # datafilesdataset = tf.data.Dataset.from_tensor_slices(datafiles)
-        # NUM_SHARDS = 6
+        datafiles = os.listdir(data_dir)
+        datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
+        datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
+        datafilesdataset = tf.data.Dataset.from_tensor_slices(datafiles)
+        NUM_SHARDS = 6
 
-        # @tf.function
-        # def parse_samples(batched_samples):
-        #     return tf.io.parse_example(
-        #         batched_samples,
-        #         {
-        #             "text": tf.io.FixedLenFeature(
-        #                 [], dtype=tf.string, default_value=""
-        #             ),
-        #         },
-        #     )
+        @tf.function()
+        def parse_samples(batched_samples):
+            return tf.io.parse_example(
+                batched_samples,
+                {
+                    "text": tf.io.FixedLenFeature(
+                        [], dtype=tf.string, default_value=""
+                    ),
+                },
+            )["text"]
 
-        # def make_dataset(shard_index):
-        #     filenames = datafilesdataset.shard(NUM_SHARDS, shard_index)
-        #     return (
-        #         tf.data.TFRecordDataset(filenames)
-        #         .batch(batch_size)
-        #         .map(
-        #             parse_samples,
-        #             num_parallel_calls=tf.data.AUTOTUNE,
-        #             deterministic=False,
-        #         )
-        #     )
-
-        # indices = tf.data.Dataset.range(NUM_SHARDS)
-        # dataset = indices.interleave(
-        #     make_dataset,
-        #     num_parallel_calls=tf.data.AUTOTUNE,
-        #     deterministic=False,
-        # ).prefetch(tf.data.AUTOTUNE)
-
-        return (
-            tf.data.Dataset.from_generator(
-                load_csv_file_column,
-                args=(data_dir, "text"),
-                output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+        def make_dataset(shard_index):
+            filenames = datafilesdataset.shard(NUM_SHARDS, shard_index)
+            return (
+                tf.data.TFRecordDataset(filenames)
+                .batch(batch_size)
+                .map(
+                    parse_samples,
+                    num_parallel_calls=tf.data.AUTOTUNE,
+                    deterministic=False,
+                )
             )
-            .batch(batch_size)
-            .prefetch(tf.data.AUTOTUNE)
-        )
+
+        indices = tf.data.Dataset.range(NUM_SHARDS)
+        dataset = indices.interleave(
+            make_dataset,
+            num_parallel_calls=tf.data.AUTOTUNE,
+            deterministic=False,
+        ).prefetch(tf.data.AUTOTUNE)
+        return dataset
+
+        # return (
+        #     tf.data.Dataset.from_generator(
+        #         load_csv_file_column,
+        #         args=(data_dir, "text"),
+        #         output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+        #     )
+        #     .batch(batch_size)
+        #     .prefetch(tf.data.AUTOTUNE)
+        # )
 
 
 class TextAutoencoderWikipediaDataset(tf.data.Dataset):

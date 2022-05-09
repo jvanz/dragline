@@ -238,20 +238,38 @@ def train_model(
 def load_dataset(dataset_dir: str, batch_size, max_text_length, vocabulary):
     logging.info("Loading datasets...")
 
+    # train_dataset = TextAutoencoderWikipediaDataset(
+    #     f"{dataset_dir}/train.csv",
+    #     batch_size=batch_size,
+    #     vocabulary=vocabulary,
+    #     max_text_length=max_text_length,
+    # )
+    # eval_dataset = TextAutoencoderWikipediaDataset(
+    #     f"{dataset_dir}/evaluation.csv",
+    #     batch_size=batch_size,
+    #     vocabulary=vocabulary,
+    #     max_text_length=max_text_length,
+    # )
+    # test_dataset = TextAutoencoderWikipediaDataset(
+    #     f"{dataset_dir}/test.csv",
+    #     batch_size=batch_size,
+    #     vocabulary=vocabulary,
+    #     max_text_length=max_text_length,
+    # )
     train_dataset = TextAutoencoderWikipediaDataset(
-        f"{dataset_dir}/train.csv",
+        f"{dataset_dir}/train",
         batch_size=batch_size,
         vocabulary=vocabulary,
         max_text_length=max_text_length,
     )
     eval_dataset = TextAutoencoderWikipediaDataset(
-        f"{dataset_dir}/evaluation.csv",
+        f"{dataset_dir}/evaluation",
         batch_size=batch_size,
         vocabulary=vocabulary,
         max_text_length=max_text_length,
     )
     test_dataset = TextAutoencoderWikipediaDataset(
-        f"{dataset_dir}/test.csv",
+        f"{dataset_dir}/test",
         batch_size=batch_size,
         vocabulary=vocabulary,
         max_text_length=max_text_length,
