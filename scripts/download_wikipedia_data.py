@@ -12,7 +12,7 @@ import tensorflow as tf
 import numpy as np
 
 
-DATA_DIR = os.environ.get("DATA_DIR", "data2")
+DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 5000))
 MAX_WORKERS = 10
 MINIMUM_SENTENCE_WORD_COUNT = 4
