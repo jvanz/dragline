@@ -43,73 +43,13 @@ python_script = PYTHONPATH=$(PWD) \
 	LEARNING_RATE=$(LEARNING_RATE) \
 	python $(1)
 
-.PHONY: download-models
-download-models: python -m spacy download pt_core_news_lg
-	python -m spacy download en_core_web_trf
-	python -m spacy download en_core_web_lg
-
 .PHONY: format
 format:
 	black gazettes/* scripts/* tests/*
 
-.PHONY: find-aquisitions
-find-aquisitions:
-	python scripts/find-buy-relations.py
-
-
 .PHONY: tests
 tests: format
 	python -m unittest -f tests/*.py
-
-.PHONY:destroy-pod
-destroy-pod:
-	podman pod rm --force --ignore $(POD_NAME)
-
-.PHONY:create-pod
-create-pod: destroy-pod
-	podman pod create -p $(STORAGE_PORT):$(STORAGE_PORT) --name $(POD_NAME)
-
-.PHONY: stop-storage
-stop-storage:
-	podman rm --force --ignore $(STORAGE_CONTAINER_NAME)
-
-.PHONY: storage
-storage: stop-storage start-storage
-
-.PHONY:start-storage
-start-storage:
-	podman run -d --rm -ti \
-	--name $(STORAGE_CONTAINER_NAME) \
-	--pod $(POD_NAME) \
-	-e MINIO_ACCESS_KEY=$(STORAGE_ACCESS_KEY) \
-	-e MINIO_SECRET_KEY=$(STORAGE_ACCESS_SECRET) \
-	-e MINIO_DEFAULT_BUCKETS=$(STORAGE_BUCKET):public \
-	$(STORAGE_IMAGE)
-
-.PHONY: download-files-sample
-download-files-sample:
-	python scripts/download_files.py
-
-.PHONY: files-sample
-files-sample:
-	python scripts/sample_files.py
-
-.PHONY: extract-text-from-sample-files
-extract-text-from-sample-files:
-	python scripts/extract_text_from_files.py
-
-.PHONY: build-containers
-build-containers:
-	podman build --tag $(IMAGE_NAMESPACE)/$(APACHE_TIKA_IMAGE_NAME):$(APACHE_TIKA_IMAGE_TAG) -f resources/Dockerfile_apache_file resources
-
-.PHONY: stop-apache-tika
-stop-apache-tika:
-	- podman rm --force $(APACHE_TIKA_CONTAINER_NAME)
-
-.PHONY: start-apache-tika
-start-apache-tika: stop-apache-tika
-	podman run -d  --name $(APACHE_TIKA_CONTAINER_NAME) -p 9998:9998 \
-		apache/tika:2.2.1
 
 .PHONY: update-conda-env
 update-conda-env:
@@ -163,9 +103,6 @@ train-transformer-autoencoder:
 download_wikipedia_dataset:
 	python scripts/download_wikipedia_data.py
 
-.PHONY: preprocess_wikipedia_dataset
-preprocess_wikipedia_dataset:
-	python scripts/preprocess_wikipedia_data.py --fit-tokenizer
 
 .PHONY: download_bertimbau_tensorflow_checkpoint
 download_bertimbau_tensorflow_checkpoint:
@@ -174,12 +111,6 @@ download_bertimbau_tensorflow_checkpoint:
 	curl -o $(DATA_DIR)/bertimbau-large-portuguese-cased_tensorflow_checkpoint.zip https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/bert-large-portuguese-cased_tensorflow_checkpoint.zip
 	curl -o $(DATA_DIR)/bertimbau-large-vocab.txt https://neuralmind-ai.s3.us-east-2.amazonaws.com/nlp/bert-large-portuguese-cased/vocab.txt
 
-.PHONY: show_data_info
-show_data_info:
-	@echo Vocabulary file: $(VOCAB_FILE)
-	@echo Vocabulary file size: $(VOCAB_SIZE)
-	@echo Wikipedia data dir: $(WIKIPEDIA_DATA_DIR)
-	@echo Wikipedia dataset size: $(WIKIPEDIA_DATASET_SIZE)
 
 .PHONY: predict-autoencoder
 predict-autoencoder: VOCAB_FILE=$(DATA_DIR)/wikipedia_vocab
