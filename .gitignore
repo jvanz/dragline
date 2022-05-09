@@ -1,5 +1,6 @@
 spider/data/
 data
+data2
 __pycache__
 gazettes.csv
 scrapy.log

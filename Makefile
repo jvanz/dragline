@@ -50,7 +50,7 @@ download-models: python -m spacy download pt_core_news_lg
 
 .PHONY: format
 format:
-	black gazettes/* scripts/*
+	black gazettes/* scripts/* tests/*
 
 .PHONY: find-aquisitions
 find-aquisitions:
@@ -58,8 +58,8 @@ find-aquisitions:
 
 
 .PHONY: tests
-tests:
-	python -m unittest -f tests
+tests: format
+	python -m unittest -f tests/*.py
 
 .PHONY:destroy-pod
 destroy-pod:
@@ -117,11 +117,10 @@ update-conda-env:
 	conda env export -n $(ENV_NAME) > $(ENV_NAME)_env.yml
 
 .PHONY: train-lstm-autoencoder
-train-lstm-autoencoder: VOCAB_SIZE=12400
-train-lstm-autoencoder:
-	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
+train-lstm-autoencoder: VOCAB_SIZE=10000
+train-lstm-autoencoder: tests
+	PYTHONPATH=$(PWD) TF_GPU_THREAD_MODE=gpu_private python scripts/text_autoencoder.py \
 		--batch-size $(BATCH_SIZE) \
-		--bidirectional-hidden-layers \
 		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
 		--embedding-dimensions 50 \
 		--embedding-file "$(DATA_DIR)/wikipedia/embeddings.txt" \
@@ -131,12 +130,16 @@ train-lstm-autoencoder:
 		--model-name lstm-autoencoder \
 		--rnn-type lstm \
 		--save-model-at models/lstm-autoencoder \
-		--train --evaluate
+		--vocab-size $(VOCAB_SIZE) \
+		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
+		--from-scratch --train --evaluate
+		# --bidirectional-hidden-layers \
 
 .PHONY: train-gru-autoencoder
 train-gru-autoencoder: VOCAB_SIZE=12400
 train-gru-autoencoder:
-	PYTHONPATH=$(PWD) python scripts/text_autoencoder.py \
+	TF_GPU_THREAD_MODE='gpu_private'  PYTHONPATH=$(PWD) \
+		python scripts/text_autoencoder.py \
 		--batch-size $(BATCH_SIZE) \
 		--bidirectional-hidden-layers \
 		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
@@ -159,6 +162,10 @@ train-transformer-autoencoder:
 .PHONY: download_wikipedia_dataset
 download_wikipedia_dataset:
 	python scripts/download_wikipedia_data.py
+
+.PHONY: preprocess_wikipedia_dataset
+preprocess_wikipedia_dataset:
+	python scripts/preprocess_wikipedia_data.py --fit-tokenizer
 
 .PHONY: download_bertimbau_tensorflow_checkpoint
 download_bertimbau_tensorflow_checkpoint:

@@ -32,6 +32,7 @@ dependencies:
   - backports=1.0=py_2
   - backports.functools_lru_cache=1.6.4=pyhd8ed1ab_0
   - beautifulsoup4=4.10.0=pyha770c72_0
+  - black=22.3.0=pyhd8ed1ab_0
   - blinker=1.4=py_1
   - brotlipy=0.7.0=py38h497a2fe_1003
   - bs4=4.10.0=hd8ed1ab_0
@@ -53,7 +54,6 @@ dependencies:
   - dataclasses=0.8=pyhc8e2a94_3
   - datasets=1.18.3=pyhd8ed1ab_0
   - decorator=5.1.1=pyhd8ed1ab_0
-  - dill=0.3.4=pyhd8ed1ab_0
   - executing=0.8.3=pyhd8ed1ab_0
   - expat=2.4.8=h27087fc_0
   - filelock=3.6.0=pyhd8ed1ab_0
@@ -145,6 +145,7 @@ dependencies:
   - mkl=2022.0.1=h8d4b97c_803
   - multidict=6.0.2=py38h497a2fe_0
   - multiprocess=0.70.12.2=py38h497a2fe_1
+  - mypy_extensions=0.4.3=py38h578d9bd_5
   - nccl=2.11.4.1=h5c60f85_2
   - ncurses=6.3=h9c3ff4c_0
   - ninja=1.10.2=h4bd325d_1
@@ -158,11 +159,13 @@ dependencies:
   - pango=1.50.6=hbd2fdc8_0
   - parquet-cpp=1.5.1=2
   - parso=0.8.3=pyhd8ed1ab_0
+  - pathspec=0.9.0=pyhd8ed1ab_0
   - pcre=8.45=h9c3ff4c_0
   - pexpect=4.8.0=pyh9f0ad1d_2
   - pickleshare=0.7.5=py_1003
   - pip=22.0.4=pyhd8ed1ab_0
   - pixman=0.40.0=h36c2ea0_0
+  - platformdirs=2.5.1=pyhd8ed1ab_0
   - prompt-toolkit=3.0.27=pyha770c72_0
   - protobuf=3.19.4=py38h709712a_0
   - pthread-stubs=0.4=h36c2ea0_1001
@@ -176,7 +179,6 @@ dependencies:
   - pygments=2.11.2=pyhd8ed1ab_0
   - pyjwt=2.3.0=pyhd8ed1ab_1
   - pyopenssl=22.0.0=pyhd8ed1ab_0
-  - pyparsing=3.0.7=pyhd8ed1ab_0
   - pysocks=1.7.1=py38h578d9bd_4
   - python=3.8.12=ha38a3c6_3_cpython
   - python-dateutil=2.8.2=pyhd8ed1ab_0
@@ -214,9 +216,11 @@ dependencies:
   - termcolor=1.1.0=py_2
   - tk=8.6.12=h27826a3_0
   - tokenizers=0.10.3=py38hb63a372_1
+  - tomli=2.0.1=pyhd8ed1ab_0
   - tqdm=4.63.0=pyhd8ed1ab_0
   - traitlets=5.1.1=pyhd8ed1ab_0
   - transformers=4.16.2=pyhd8ed1ab_0
+  - typed-ast=1.5.3=py38h0a891b7_0
   - typing-extensions=4.1.1=hd8ed1ab_0
   - typing_extensions=4.1.1=pyha770c72_0
   - tzdata=2021e=he74cb21_0
@@ -243,4 +247,21 @@ dependencies:
   - zipp=3.7.0=pyhd8ed1ab_1
   - zlib=1.2.11=h36c2ea0_1013
   - zstd=1.5.2=ha95c52a_0
+  - pip:
+    - apache-beam==2.38.0
+    - cloudpickle==2.0.0
+    - crcmod==1.7
+    - dill==0.3.1.1
+    - docopt==0.6.2
+    - fastavro==1.4.11
+    - gviz-api==1.10.0
+    - hdfs==2.7.0
+    - httplib2==0.19.1
+    - mwparserfromhell==0.6.4
+    - oauth2client==4.1.3
+    - orjson==3.6.8
+    - proto-plus==1.20.3
+    - pymongo==3.12.3
+    - pyparsing==2.4.7
+    - tensorboard-plugin-profile==2.8.0
 prefix: /home/jvanz/anaconda3/envs/transformer

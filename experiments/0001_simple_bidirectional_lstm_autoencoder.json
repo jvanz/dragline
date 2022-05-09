@@ -1,0 +1,26 @@
+{
+	"type": "model",
+	"version": "0.9.0",
+	"framework": "tensorflow",
+	"model": {
+		"layers":
+		[
+			{
+				"type":"input",
+				"shape" : []
+			},
+			{
+				"type":"lstm",
+				"units": 265,
+				"activation": "",
+				"dropout": 0.2
+			}
+		],
+		"loss": {"type": ""},
+		"optimizer": {"type": ""},
+		"metrics":
+		[
+			{"type":""}
+		]
+	}
+}
