@@ -214,11 +214,3 @@ download-word-embeddings:
 	mkdir -p $(DATA_DIR)/embeddings
 	curl -o $(DATA_DIR)/embeddings/glove_s50.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s50.zip
 	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s50.zip
-	curl -o $(DATA_DIR)/embeddings/glove_s100.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s100.zip
-	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s100.zip
-	curl -o $(DATA_DIR)/embeddings/glove_s300.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s300.zip
-	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s300.zip
-	curl -o $(DATA_DIR)/embeddings/glove_s600.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s600.zip
-	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s600.zip
-	curl -o $(DATA_DIR)/embeddings/glove_s1000.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s1000.zip
-	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s1000.zip
