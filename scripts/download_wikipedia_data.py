@@ -24,13 +24,11 @@ DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 5000))
 MAX_WORKERS = 10
 MINIMUM_SENTENCE_WORD_COUNT = 4
-save_csv = False
+save_csv = True
 save_raw_dataset = True
 should_fit_tokenizer = True
 fit_tokenizer = False
 build_vocabulary = True
-max_text_length = 40
-embedding_dimensions = 50
 
 VALID_SENTENCE_REGEX = r"^[\s\w,]+$"
 
@@ -250,7 +248,7 @@ def main():
         write_wikipedia_file(datasets)
     if build_vocabulary:
         build_vocabulary_file()
-    if fit_tokenizer:
+    if should_fit_tokenizer:
         tokenizer = fit_tokenizer(datasets)
     if False and save_raw_dataset:
         write_tfrecord_files(datasets)

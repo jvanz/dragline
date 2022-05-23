@@ -185,7 +185,7 @@ def train_model(
         restore_best_weights=True,
     )
     tb_callback = tf.keras.callbacks.TensorBoard(
-        "./logs", update_freq=1000, profile_batch="10, 20"
+        "./logs", update_freq=1000, profile_batch="100, 120"
     )
     nan_callback = tf.keras.callbacks.TerminateOnNaN()
 
@@ -196,7 +196,7 @@ def train_model(
         callbacks=[
             model_weights_checkpoint_callback,
             early_stop_callback,
-            # tb_callback,
+            tb_callback,
             nan_callback,
         ],
     )
