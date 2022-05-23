@@ -72,12 +72,13 @@ train-lstm-autoencoder: tests
 		--save-model-at models/lstm-autoencoder \
 		--vocab-size $(VOCAB_SIZE) \
 		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
+		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
 		--from-scratch --train --evaluate
 		# --bidirectional-hidden-layers \
 
 .PHONY: train-gru-autoencoder
 train-gru-autoencoder: VOCAB_SIZE=12400
-train-gru-autoencoder:
+train-gru-autoencoder: tests
 	TF_GPU_THREAD_MODE='gpu_private'  PYTHONPATH=$(PWD) \
 		python scripts/text_autoencoder.py \
 		--batch-size $(BATCH_SIZE) \
@@ -100,8 +101,8 @@ train-transformer-autoencoder:
 	$(call python_script, scripts/text_autoencoder_transformer.py)
 
 .PHONY: download_wikipedia_dataset
-download_wikipedia_dataset:
-	python scripts/download_wikipedia_data.py
+download_wikipedia_dataset: tests
+	PYTHONPATH=$(PWD) python scripts/download_wikipedia_data.py
 
 
 .PHONY: download_bertimbau_tensorflow_checkpoint

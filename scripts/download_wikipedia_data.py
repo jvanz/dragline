@@ -11,19 +11,26 @@ from datasets import load_dataset
 import tensorflow as tf
 import numpy as np
 
+from gazettes.data import get_dataset_stats, START_TOKEN, STOP_TOKEN
+
+from gazettes.data import (
+    TextAutoencoderWikipediaCSVDataset,
+    START_TOKEN,
+    STOP_TOKEN,
+    build_and_save_vocabulary,
+)
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 5000))
 MAX_WORKERS = 10
 MINIMUM_SENTENCE_WORD_COUNT = 4
-save_csv = True
+save_csv = False
 save_raw_dataset = True
 should_fit_tokenizer = True
+fit_tokenizer = False
+build_vocabulary = True
 max_text_length = 40
 embedding_dimensions = 50
-
-PADDING_TOKEN = "<PAD>"
-UNK_TOKEN = "[UNK]"
 
 VALID_SENTENCE_REGEX = r"^[\s\w,]+$"
 
@@ -135,16 +142,25 @@ def get_wikipedia_dataset(
     return datasets
 
 
+def return_all_samples(datasets):
+    for dataset_split_name in datasets:
+        for sample in datasets[dataset_split_name]:
+            yield sample["text"].split(" ")
+
+
 def load_datasets():
     print("Loading datasets...")
     dataset_name = "wikipedia"
     dataset_language = "pt"
     dataset_date = "20220220"
     datasets = get_wikipedia_dataset(dataset_name, dataset_language, dataset_date)
+    print("Calculating stats...")
+    data_stats = get_dataset_stats(return_all_samples(datasets))
     metadata = {
         "name": dataset_name,
         "language": dataset_language,
         "date": dataset_date,
+        "statistics": data_stats,
     }
     for dataset_split_name in datasets:
         metadata[dataset_split_name] = {"length": len(datasets[dataset_split_name])}
@@ -198,16 +214,26 @@ def fit_tokenizer(datasets):
     print("Fitting tokenizer")
 
     def text_gen():
-        for dataset_split_name in datasets:
-            dataset = datasets[dataset_split_name]
-            for batch in dataset.to_dict(batched=True):
-                for sample in batch["text"]:
-                    yield sample
+        dataset = datasets["train"]
+        for batch in dataset.to_dict(batched=True):
+            for sample in batch["text"]:
+                yield f"{START_TOKEN} {sample} {STOP_TOKEN}"
 
     tokenizer.fit_on_texts(text_gen())
     with open(f"{DATA_DIR}/wikipedia/tokenizer.json", "w") as tokenizerfile:
         tokenizerfile.write(tokenizer.to_json())
     return tokenizer
+
+
+def build_vocabulary_file():
+    print("Building vocabulary file...")
+    train_dataset = TextAutoencoderWikipediaCSVDataset(
+        f"{DATA_DIR}/wikipedia/train.csv",
+        start_token=START_TOKEN,
+        stop_token=STOP_TOKEN,
+    ).map(lambda x, y: y)
+    print(list(train_dataset.take(1)))
+    build_and_save_vocabulary(train_dataset, f"{DATA_DIR}/wikipedia/vocabulary")
 
 
 def main():
@@ -220,10 +246,13 @@ def main():
     os.makedirs(f"{DATA_DIR}/wikipedia/evaluation", exist_ok=True)
 
     datasets, metadata = load_datasets()
-    tokenizer = fit_tokenizer(datasets)
     if save_csv:
         write_wikipedia_file(datasets)
-    if save_raw_dataset:
+    if build_vocabulary:
+        build_vocabulary_file()
+    if fit_tokenizer:
+        tokenizer = fit_tokenizer(datasets)
+    if False and save_raw_dataset:
         write_tfrecord_files(datasets)
     with open(f"{DATA_DIR}/wikipedia/metadata.json", "w") as metadatafile:
         json.dump(metadata, metadatafile)

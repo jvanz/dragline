@@ -1,6 +1,7 @@
 import json
 import re
 import os
+import sys
 import csv
 from urllib.parse import urlparse
 import logging
@@ -12,10 +13,30 @@ from gensim.models import KeyedVectors
 
 PRETRAINED_UNK_EMBEDDING_TOKEN = "<unk>"
 UNK_TOKEN = "[UNK]"
+START_TOKEN = "STX"
+STOP_TOKEN = "ETX"
 PADDING_TOKEN = ""
 
 
-def load_vocabulary(tokenizer_config_file: str, vocabulary_size: int):
+def get_dataset_stats(dataset):
+    logging.debug("Generating dataset stats")
+    max_sequence_length = 0
+    min_sequence_length = sys.maxsize
+    total_number_tokens = 0
+    total_sample_count = 0
+    for sample in dataset:
+        total_number_tokens += len(sample)
+        total_sample_count += 1
+        max_sequence_length = max(max_sequence_length, len(sample))
+        min_sequence_length = min(min_sequence_length, len(sample))
+    return {
+        "max_sequence_length": max_sequence_length,
+        "min_sequence_length": min_sequence_length,
+        "average_sequence_length": round(total_number_tokens / total_sample_count),
+    }
+
+
+def load_vocabulary_from_tokenizer(tokenizer_config_file: str, vocabulary_size: int):
     with open(tokenizer_config_file, "r") as config_file:
         config = json.load(config_file)
         vocabulary = list(json.loads(config["config"]["word_counts"]).items())
@@ -26,6 +47,30 @@ def load_vocabulary(tokenizer_config_file: str, vocabulary_size: int):
         vocabulary.insert(0, UNK_TOKEN)
         vocabulary.insert(0, PADDING_TOKEN)
         return vocabulary
+
+
+def build_vocabulary(dataset):
+    text_vectorization = tf.keras.layers.TextVectorization()
+    text_vectorization.adapt(dataset)
+    return text_vectorization.get_vocabulary(include_special_tokens=False)
+
+
+def build_and_save_vocabulary(dataset, filepath):
+    with open(filepath, "w") as vocab_file:
+        for token in build_vocabulary(dataset):
+            vocab_file.write(token)
+            vocab_file.write("\n")
+        vocab_file.flush()
+
+
+def load_vocabulary_from_file(filepath, vocab_size: int = None):
+    vocabulary = []
+    with open(filepath, "r") as vocab_file:
+        for token in vocab_file:
+            vocabulary.append(token.strip())
+    if vocab_size is not None and vocab_size > 0:
+        vocabulary = vocabulary[:vocab_size]
+    return vocabulary
 
 
 def load_pretrained_embeddings(embeddings_file: str):
@@ -120,6 +165,67 @@ class WikipediaDataset(tf.data.Dataset):
         #     .batch(batch_size)
         #     .prefetch(tf.data.AUTOTUNE)
         # )
+
+
+class TextAutoencoderWikipediaCSVDataset(tf.data.Dataset):
+    def __new__(
+        cls,
+        csv_file_path: str,
+        start_token: str = None,
+        stop_token: str = None,
+        text_vectorization=None,
+        batch_size: int = 32,
+        num_parallel_calls: int = tf.data.AUTOTUNE,
+        deterministic: bool = False,
+    ):
+        dataset = tf.data.Dataset.from_generator(
+            load_csv_file_column,
+            args=(csv_file_path, "text"),
+            output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+        ).prefetch(tf.data.AUTOTUNE)
+
+        dataset = dataset.map(
+            lambda x: (x, x),
+            num_parallel_calls=num_parallel_calls,
+            deterministic=deterministic,
+        )
+
+        assert (
+            start_token is not None
+            and stop_token is not None
+            or start_token is None
+            and stop_token is None
+        )
+
+        def add_start_stop_tokens(x, y):
+            return x, tf.strings.join([start_token, " ", y, " ", stop_token])
+
+        if start_token is not None and stop_token is not None:
+            dataset = dataset.map(
+                add_start_stop_tokens,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=deterministic,
+            )
+
+        if text_vectorization is not None:
+
+            def text_vectorization_function(x, y):
+                return x, text_vectorization(y)
+
+            def add_decoder_input(x, y):
+                return (x, y), y
+
+            dataset = dataset.map(
+                text_vectorization_function,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=deterministic,
+            ).map(
+                add_decoder_input,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=deterministic,
+            )
+
+        return dataset
 
 
 class TextAutoencoderWikipediaDataset(tf.data.Dataset):

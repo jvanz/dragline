@@ -9,16 +9,18 @@ from tensorflow import keras
 import numpy as np
 from gensim.models import KeyedVectors
 
-from gazettes.data import TextAutoencoderWikipediaDataset
 from gazettes.data import (
-    load_vocabulary,
+    TextAutoencoderWikipediaDataset,
+    TextAutoencoderWikipediaCSVDataset,
+    START_TOKEN,
+    STOP_TOKEN,
+)
+from gazettes.data import (
     load_pretrained_embeddings,
     load_tokenizer,
     prepare_embedding_matrix,
+    load_vocabulary_from_file,
 )
-
-PADDING_TOKEN = "<PAD>"
-UNK_TOKEN = "<unk>"
 
 
 def create_checkpoint_dir(checkpoint_dir, model_name):
@@ -38,84 +40,42 @@ def create_model(
     model_name,
     learning_rate,
     vocabulary,
-    embedding_matrix,
 ):
     logging.info("Creating model...")
 
-    vectorize_layer = tf.keras.layers.TextVectorization(
-        max_tokens=len(vocabulary),
-        output_mode="int",
-        output_sequence_length=max_text_length,
-        trainable=False,
+    encoder_input = tf.keras.Input(shape=(None), dtype=tf.string)
+    text_vectorization = tf.keras.layers.TextVectorization(
+        vocabulary=vocabulary, output_sequence_length=max_text_length
+    )(encoder_input)
+    encoder_layers_arguments = {
+        "units": dimensoes_espaco_latent,
+        "dropout": dropout,
+        "activation": activation,
+        "return_state": True,
+    }
+    encoder_outputs, state_h, state_c = tf.keras.layers.LSTM(
+        **encoder_layers_arguments
+    )(text_vectorization)
+    encoder_states = (state_h, state_c)
+
+    decoder_input = tf.keras.Input(shape=(None, len(vocabulary)))
+    decoder_layer_arguments = {
+        "units": dimensoes_espaco_latent,
+        "return_sequences": True,
+        "dropout": dropout,
+        "activation": activation,
+        "return_state": True,
+    }
+    decoder_output, _, _ = tf.keras.layers.LSTM(**decoder_layer_arguments)(
+        decoder_input, initial_state=encoder_states
     )
-    vectorize_layer.set_vocabulary(vocabulary)
-    embedding_layer = tf.keras.layers.Embedding(
-        len(vocabulary),
-        embedding_dimensions,
-        embeddings_initializer=keras.initializers.Constant(embedding_matrix),
-        trainable=False,
+    decoder_output = tf.keras.layers.Dense(len(vocabulary), activation="softmax")(
+        decoder_output
     )
 
-    encoder_input = tf.keras.Input(shape=(1,), dtype=tf.string)
-    vectorize_layer = vectorize_layer(encoder_input)
-    embedding_layer = embedding_layer(vectorize_layer)
-    layer = None
-    if rnn_type == "lstm":
-        layer = tf.keras.layers.LSTM(
-            units=dimensoes_espaco_latent, dropout=dropout, activation=activation
-        )
-    else:
-        layer = tf.keras.layers.GRU(
-            units=dimensoes_espaco_latent, dropout=dropout, activation=activation
-        )
-    encoder = None
-    if bidirectional:
-        encoder = tf.keras.layers.Bidirectional(layer, merge_mode="sum")(
-            embedding_layer
-        )
-    else:
-        encoder = layer(embedding_layer)
-
-    decoder = tf.keras.layers.RepeatVector(max_text_length, name="repeater")(encoder)
-    if rnn_type == "lstm":
-        if bidirectional:
-            decoder = tf.keras.layers.Bidirectional(
-                tf.keras.layers.LSTM(
-                    units=embedding_dimensions,
-                    return_sequences=True,
-                    dropout=dropout,
-                    activation=activation,
-                ),
-                merge_mode="sum",
-            )(decoder)
-        else:
-            decoder = tf.keras.layers.LSTM(
-                units=embedding_dimensions,
-                return_sequences=True,
-                dropout=dropout,
-                activation=activation,
-            )(decoder)
-    else:
-        if bidirectional:
-            decoder = tf.keras.layers.Bidirectional(
-                tf.keras.layers.GRU(
-                    units=embedding_dimensions,
-                    return_sequences=True,
-                    dropout=dropout,
-                    activation=activation,
-                ),
-                merge_mode="sum",
-            )(decoder)
-        else:
-            decoder = tf.keras.layers.GRU(
-                units=embedding_dimensions,
-                return_sequences=True,
-                dropout=dropout,
-                activation=activation,
-            )(decoder)
-    decoder = tf.keras.layers.Dense(len(vocabulary), activation="softmax")(decoder)
-
-    model = tf.keras.Model(encoder_input, decoder, name=model_name)
+    model = tf.keras.Model(
+        inputs=[encoder_input, decoder_input], outputs=decoder_output, name=model_name
+    )
 
     loss = tf.keras.losses.CategoricalCrossentropy()
     optimizer = tf.keras.optimizers.RMSprop(learning_rate)
@@ -153,7 +113,6 @@ def create_or_load_model(
     from_scratch,
     checkpoint_dir,
     vocabulary,
-    embedding_matrix,
 ):
     latest_checkpoint = get_latest_checkpoint(checkpoint_dir, model_name)
     if from_scratch or latest_checkpoint is None:
@@ -170,7 +129,6 @@ def create_or_load_model(
             model_name,
             learning_rate,
             vocabulary,
-            embedding_matrix,
         )
     else:
         print("Restoring from", latest_checkpoint)
@@ -235,45 +193,18 @@ def train_model(
     )
 
 
-def load_dataset(dataset_dir: str, batch_size, max_text_length, vocabulary):
+def load_dataset(dataset_dir: str, batch_size, text_vectorization):
     logging.info("Loading datasets...")
 
-    # train_dataset = TextAutoencoderWikipediaDataset(
-    #     f"{dataset_dir}/train.csv",
-    #     batch_size=batch_size,
-    #     vocabulary=vocabulary,
-    #     max_text_length=max_text_length,
-    # )
-    # eval_dataset = TextAutoencoderWikipediaDataset(
-    #     f"{dataset_dir}/evaluation.csv",
-    #     batch_size=batch_size,
-    #     vocabulary=vocabulary,
-    #     max_text_length=max_text_length,
-    # )
-    # test_dataset = TextAutoencoderWikipediaDataset(
-    #     f"{dataset_dir}/test.csv",
-    #     batch_size=batch_size,
-    #     vocabulary=vocabulary,
-    #     max_text_length=max_text_length,
-    # )
-    train_dataset = TextAutoencoderWikipediaDataset(
-        f"{dataset_dir}/train",
-        batch_size=batch_size,
-        vocabulary=vocabulary,
-        max_text_length=max_text_length,
-    )
-    eval_dataset = TextAutoencoderWikipediaDataset(
-        f"{dataset_dir}/evaluation",
-        batch_size=batch_size,
-        vocabulary=vocabulary,
-        max_text_length=max_text_length,
-    )
-    test_dataset = TextAutoencoderWikipediaDataset(
-        f"{dataset_dir}/test",
-        batch_size=batch_size,
-        vocabulary=vocabulary,
-        max_text_length=max_text_length,
-    )
+    train_dataset = TextAutoencoderWikipediaCSVDataset(
+        f"{dataset_dir}/train.csv", start_token=START_TOKEN, stop_token=STOP_TOKEN
+    ).batch(batch_size)
+    eval_dataset = TextAutoencoderWikipediaCSVDataset(
+        f"{dataset_dir}/eval.csv", start_token=START_TOKEN, stop_token=STOP_TOKEN
+    ).batch(batch_size)
+    test_dataset = TextAutoencoderWikipediaCSVDataset(
+        f"{dataset_dir}/test.csv", start_token=START_TOKEN, stop_token=STOP_TOKEN
+    ).batch(batch_size)
     return train_dataset, eval_dataset, test_dataset
 
 
@@ -374,6 +305,12 @@ def command_line_args():
         help="This file is not used to build a tokenizer. It is used to get the vocabulary only",
     )
     parser.add_argument(
+        "--vocabulary-file",
+        required=True,
+        type=pathlib.Path,
+        help="This file is not used to build a tokenizer. It is used to get the vocabulary only",
+    )
+    parser.add_argument(
         "--vocab-size",
         required=False,
         type=int,
@@ -389,7 +326,7 @@ def command_line_args():
         action="store_true",
         help="",
     )
-    parser.add_argument("--max-text-length", required=False, type=int, default=40)
+    parser.add_argument("--max-text-length", required=False, type=int, default=20)
     parser.add_argument("--batch-size", required=False, type=int, default=32)
     parser.add_argument("--epochs", required=False, type=int, default=1000)
     parser.add_argument("--patience", required=False, type=int, default=20)
@@ -435,18 +372,16 @@ def main():
     logging.debug(args)
     logging.debug("##########################################")
 
-    vocabulary = load_vocabulary(args.tokenizer_config_file, args.vocab_size)
-    tokenizer = load_tokenizer(args.tokenizer_config_file)
-    embedding_matrix = prepare_embedding_matrix(
-        args.tokenizer_config_file, args.embedding_file, args.vocab_size
+    vocabulary = load_vocabulary_from_file(
+        args.vocabulary_file, vocabulary_size=args.vocab_size
     )
+    text_vectorization = tf.keras.layers.TextVectorization(vocabulary=vocabulary)
 
     train_dataset, eval_dataset, test_dataset = load_dataset(
-        args.dataset_dir, args.batch_size, args.max_text_length, vocabulary
+        args.dataset_dir, args.batch_size, text_vectorization
     )
     logging.info(train_dataset.element_spec)
-    logging.info(eval_dataset.element_spec)
-    logging.info(test_dataset.element_spec)
+    logging.info(list(train_dataset.take(1)))
 
     if args.train:
         model = create_or_load_model(
@@ -463,7 +398,6 @@ def main():
             args.from_scratch,
             args.checkpoint_dir,
             vocabulary,
-            embedding_matrix,
         )
         train_model(
             model,
@@ -477,7 +411,8 @@ def main():
         if args.save_model_at:
             save_model(model, args.save_model_at)
 
-    if args.evaluate:
+    if False and args.evaluate:
+        # TODO rebuild the model to be able to predict text
         evaluate_model(test_dataset, args.save_model_at)
 
 

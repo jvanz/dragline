@@ -7,11 +7,18 @@ import tensorflow as tf
 import numpy as np
 
 from gazettes.data import (
-    load_vocabulary,
+    load_vocabulary_from_tokenizer,
     load_csv_file_column,
     load_pretrained_embeddings,
     load_tokenizer,
     prepare_embedding_matrix,
+    get_dataset_stats,
+    TextAutoencoderWikipediaCSVDataset,
+    START_TOKEN,
+    STOP_TOKEN,
+    build_vocabulary,
+    build_and_save_vocabulary,
+    load_vocabulary_from_file,
 )
 
 
@@ -28,10 +35,10 @@ class DataFunctionTestCase(unittest.TestCase):
             tokenizer_file.flush()
 
             vocab_size = 1
-            vocabulary = load_vocabulary(tokenizer_file.name, vocab_size)
+            vocabulary = load_vocabulary_from_tokenizer(tokenizer_file.name, vocab_size)
             self.assertEqual(vocabulary, ["", "[UNK]", "sei"])
             vocab_size = 2
-            vocabulary = load_vocabulary(tokenizer_file.name, vocab_size)
+            vocabulary = load_vocabulary_from_tokenizer(tokenizer_file.name, vocab_size)
             self.assertEqual(vocabulary, ["", "[UNK]", "sei", "eu"])
 
     def write_fake_tokenizer_file(self, tokenizer_file):
@@ -161,3 +168,345 @@ class DataFunctionTestCase(unittest.TestCase):
             csv_file_name = csv_file.name
         entries = list(load_csv_file_column(csv_file_name, "text"))
         self.assertEqual(entries, ["first text", "second text"])
+
+    def test_dataset_stats(self):
+        stats = get_dataset_stats(
+            [
+                ["This", "is", "a", "sentence"],
+                ["This", "is", "a", "second", "sentence"],
+                ["I", "do", "not", "know", "what", "to", "write", "there"],
+            ]
+        )
+        self.assertEqual(
+            stats,
+            {
+                "max_sequence_length": 8,
+                "min_sequence_length": 4,
+                "average_sequence_length": 6,
+            },
+        )
+
+    def test_build_vocabulary(self):
+        dataset = [
+            "Essa é uma sentença do dataset",
+            "Essa é outra sentença do dataset",
+            "Qualuer outra frase que possa ter alguns tokens repetidos",
+        ]
+        expected_vocabulary = [
+            "é",
+            "sentença",
+            "outra",
+            "essa",
+            "do",
+            "dataset",
+            "uma",
+            "tokens",
+            "ter",
+            "repetidos",
+            "que",
+            "qualuer",
+            "possa",
+            "frase",
+            "alguns",
+        ]
+
+        def get_dataset():
+            for sample in dataset:
+                yield sample
+
+        vocabulary = build_vocabulary(
+            tf.data.Dataset.from_generator(
+                get_dataset, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string))
+            )
+        )
+        self.assertEqual(vocabulary, expected_vocabulary)
+
+    def test_build_and_save_vocabulary(self):
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf8", delete=True
+        ) as vocab_file:
+
+            dataset = [
+                "Essa é uma sentença do dataset",
+                "Essa é outra sentença do dataset",
+                "Qualuer outra frase que possa ter alguns tokens repetidos",
+            ]
+            expected_vocabulary = [
+                "é",
+                "sentença",
+                "outra",
+                "essa",
+                "do",
+                "dataset",
+                "uma",
+                "tokens",
+                "ter",
+                "repetidos",
+                "que",
+                "qualuer",
+                "possa",
+                "frase",
+                "alguns",
+            ]
+
+            def get_dataset():
+                for sample in dataset:
+                    yield sample
+
+            build_and_save_vocabulary(
+                tf.data.Dataset.from_generator(
+                    get_dataset,
+                    output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+                ),
+                vocab_file.name,
+            )
+            with open(vocab_file.name, "r") as check_vocab_file:
+                vocab = []
+                for line in check_vocab_file:
+                    vocab.append(line.strip())
+                self.assertEqual(expected_vocabulary, vocab)
+
+    def test_load_vocab_from_file(self):
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf8", delete=True
+        ) as vocab_file:
+            expected_vocabulary = [
+                "é",
+                "sentença",
+                "outra",
+                "essa",
+                "do",
+                "dataset",
+                "uma",
+                "tokens",
+                "ter",
+                "repetidos",
+                "que",
+                "qualuer",
+                "possa",
+                "frase",
+                "alguns",
+            ]
+            for token in expected_vocabulary:
+                vocab_file.write(token)
+                vocab_file.write("\n")
+            vocab_file.flush()
+            vocabulary = load_vocabulary_from_file(vocab_file.name)
+            self.assertEqual(expected_vocabulary, vocabulary)
+
+            vocab_size = 2
+            vocabulary = load_vocabulary_from_file(
+                vocab_file.name, vocab_size=vocab_size
+            )
+            self.assertEqual(expected_vocabulary[:2], vocabulary)
+
+
+class TextAutoencoderWikipediaDatasetCSVTests(unittest.TestCase):
+    def write_csv_file(self, csv_file, data):
+        fieldnames = list(data.keys())
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for column in data:
+            for row in data[column]:
+                writer.writerow({column: row})
+        csv_file.flush()
+
+    def test_load_csv_file_into_dataset(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf8", delete=True) as csv_file:
+            data = {"text": ["This is the first row", "This is the second row"]}
+            self.write_csv_file(csv_file, data)
+            dataset = TextAutoencoderWikipediaCSVDataset(
+                csv_file.name, deterministic=True
+            )
+            self.assertIsNotNone(dataset)
+            data = list(dataset.as_numpy_iterator())
+            self.assertEqual(
+                data,
+                [
+                    (b"This is the first row", b"This is the first row"),
+                    (b"This is the second row", b"This is the second row"),
+                ],
+            )
+
+    def test_add_start_stop_token_dataset(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf8", delete=True) as csv_file:
+            data = {"text": ["This is the first row", "This is the second row"]}
+            self.write_csv_file(csv_file, data)
+            dataset = TextAutoencoderWikipediaCSVDataset(
+                csv_file.name,
+                start_token=START_TOKEN,
+                stop_token=STOP_TOKEN,
+                deterministic=True,
+            )
+
+            self.assertIsNotNone(dataset)
+            data = list(dataset.as_numpy_iterator())
+            self.assertEqual(
+                data,
+                [
+                    (
+                        b"This is the first row",
+                        f"{START_TOKEN} This is the first row {STOP_TOKEN}".encode(
+                            "utf8"
+                        ),
+                    ),
+                    (
+                        b"This is the second row",
+                        f"{START_TOKEN} This is the second row {STOP_TOKEN}".encode(
+                            "utf8"
+                        ),
+                    ),
+                ],
+            )
+
+    def test_text_vectorization(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf8", delete=True) as csv_file:
+            dataset = ["This is the first row", "This is the second row"]
+            data = {"text": dataset}
+            self.write_csv_file(csv_file, data)
+
+            def get_dataset():
+                for sample in dataset:
+                    yield sample
+
+            text_vectorization = tf.keras.layers.TextVectorization()
+            text_vectorization.adapt(
+                tf.data.Dataset.from_generator(
+                    get_dataset,
+                    output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+                )
+            )
+
+            dataset = TextAutoencoderWikipediaCSVDataset(
+                csv_file.name,
+                start_token=START_TOKEN,
+                stop_token=STOP_TOKEN,
+                text_vectorization=text_vectorization,
+                deterministic=True,
+            )
+
+            self.assertIsNotNone(dataset)
+            data = list(dataset.as_numpy_iterator())
+            expected_output = [
+                (
+                    (
+                        b"This is the first row",
+                        text_vectorization(
+                            tf.constant(
+                                f"{START_TOKEN} This is the first row {STOP_TOKEN}"
+                            )
+                        ).numpy(),
+                    ),
+                    text_vectorization(
+                        tf.constant(f"{START_TOKEN} This is the first row {STOP_TOKEN}")
+                    ).numpy(),
+                ),
+                (
+                    (
+                        b"This is the second row",
+                        text_vectorization(
+                            tf.constant(
+                                f"{START_TOKEN} This is the second row {STOP_TOKEN}"
+                            )
+                        ).numpy(),
+                    ),
+                    text_vectorization(
+                        tf.constant(
+                            f"{START_TOKEN} This is the second row {STOP_TOKEN}"
+                        )
+                    ).numpy(),
+                ),
+            ]
+            for output, expected in zip(data, expected_output):
+                self.assertEqual(output[0][0], expected[0][0])
+                self.assertTrue(np.array_equal(output[0][1], expected[0][1]))
+                self.assertTrue(np.array_equal(output[1], expected[1]))
+
+
+class TensorflowTests(unittest.TestCase):
+    def test_text_vectorization(self):
+        dataset = [
+            "STX Essa é uma sentença do dataset ETX",
+            "STX Essa é outra sentença do dataset ETX",
+            "STX Qualquer outra frase que possa ter alguns tokens repetidos ETX",
+        ]
+
+        def get_dataset():
+            for sample in dataset:
+                yield sample
+
+        text_vectorization = tf.keras.layers.TextVectorization()
+        text_vectorization.adapt(
+            tf.data.Dataset.from_generator(
+                get_dataset, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string))
+            )
+        )
+        text_vectorization2 = tf.keras.layers.TextVectorization(
+            vocabulary=text_vectorization.get_vocabulary()
+        )
+
+        sentence = "Uma frase qualquer para tester vectorizadores"
+        sentence_vec1 = text_vectorization(tf.constant(sentence)).numpy()
+        sentence_vec2 = text_vectorization2(tf.constant(sentence)).numpy()
+        self.assertTrue(np.array_equal(sentence_vec1, sentence_vec2))
+
+        self.assertEqual(
+            text_vectorization.get_vocabulary(False),
+            text_vectorization2.get_vocabulary(False),
+        )
+        self.assertEqual(
+            text_vectorization.get_vocabulary(), text_vectorization2.get_vocabulary()
+        )
+        self.assertEqual("", text_vectorization2.get_vocabulary()[0])
+        self.assertEqual("[UNK]", text_vectorization2.get_vocabulary()[1])
+
+    def test_model_with_text_vectorization(self):
+        dataset = [
+            "STX Essa é uma sentença do dataset ETX",
+            "STX Essa é outra sentença do dataset ETX",
+            "STX Qualquer outra frase que possa ter alguns tokens repetidos ETX",
+        ]
+
+        def get_dataset():
+            for sample in dataset:
+                yield sample
+
+        text_vectorization = tf.keras.layers.TextVectorization()
+        text_vectorization.adapt(
+            tf.data.Dataset.from_generator(
+                get_dataset, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string))
+            )
+        )
+
+        model = tf.keras.Sequential()
+        model.add(text_vectorization)
+        output = model.predict(["Uma frase qualquer para tester vectorizadores"])
+        expected_output = np.array([[10, 17, 15, 1, 1, 1]])
+        self.assertTrue(np.array_equal(output, expected_output))
+
+    def test_model_with_string_input_and_text_vectorization(self):
+        dataset = [
+            "STX Essa é uma sentença do dataset ETX",
+            "STX Essa é outra sentença do dataset ETX",
+            "STX Qualquer outra frase que possa ter alguns tokens repetidos ETX",
+        ]
+
+        def get_dataset():
+            for sample in dataset:
+                yield sample
+
+        text_vectorization = tf.keras.layers.TextVectorization(
+            output_sequence_length=10, pad_to_max_tokens=True, max_tokens=20
+        )
+        text_vectorization.adapt(
+            tf.data.Dataset.from_generator(
+                get_dataset, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string))
+            )
+        )
+
+        model = tf.keras.Sequential()
+        model.add(tf.keras.layers.Input(shape=(None,), dtype=tf.string))
+        model.add(text_vectorization)
+        output = model.predict(["Uma frase qualquer para tester vectorizadores"])
+        expected_output = np.array([[10, 17, 15, 1, 1, 1, 0, 0, 0, 0]])
+        self.assertTrue(np.array_equal(output, expected_output))
