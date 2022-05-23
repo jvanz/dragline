@@ -70,9 +70,9 @@ train-lstm-autoencoder: tests
 		--model-name lstm-autoencoder \
 		--rnn-type lstm \
 		--save-model-at models/lstm-autoencoder \
-		--vocab-size $(VOCAB_SIZE) \
 		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
-		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
+		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/vocabulary \
+		--vocab-size $(VOCAB_SIZE) \
 		--from-scratch --train --evaluate
 		# --bidirectional-hidden-layers \
 
@@ -91,6 +91,9 @@ train-gru-autoencoder: tests
 		--learning-rate $(LEARNING_RATE) \
 		--model-name gru-autoencoder \
 		--rnn-type gru \
+		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/vocabulary \
+		--vocab-size $(VOCAB_SIZE) \
+		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
 		--save-model-at models/gru-autoencoder \
 		--train --evaluate
 

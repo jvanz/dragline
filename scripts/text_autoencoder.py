@@ -43,11 +43,14 @@ def create_model(
 ):
     logging.info("Creating model...")
 
-    encoder_input = tf.keras.Input(shape=(None), dtype=tf.string)
-    text_vectorization = tf.keras.layers.TextVectorization(
-        vocabulary=vocabulary, output_sequence_length=max_text_length
-    )(encoder_input)
+    encoder_input = tf.keras.Input(
+        shape=(
+            max_text_length,
+            len(vocabulary),
+        )
+    )
     encoder_layers_arguments = {
+        "name": "encoder",
         "units": dimensoes_espaco_latent,
         "dropout": dropout,
         "activation": activation,
@@ -55,11 +58,17 @@ def create_model(
     }
     encoder_outputs, state_h, state_c = tf.keras.layers.LSTM(
         **encoder_layers_arguments
-    )(text_vectorization)
+    )(encoder_input)
     encoder_states = (state_h, state_c)
 
-    decoder_input = tf.keras.Input(shape=(None, len(vocabulary)))
+    decoder_input = tf.keras.Input(
+        shape=(
+            max_text_length,
+            len(vocabulary),
+        )
+    )
     decoder_layer_arguments = {
+        "name": "decoder",
         "units": dimensoes_espaco_latent,
         "return_sequences": True,
         "dropout": dropout,
@@ -193,17 +202,35 @@ def train_model(
     )
 
 
-def load_dataset(dataset_dir: str, batch_size, text_vectorization):
+def load_dataset(dataset_dir: str, batch_size, text_vectorization, vocabulary_size):
     logging.info("Loading datasets...")
 
     train_dataset = TextAutoencoderWikipediaCSVDataset(
-        f"{dataset_dir}/train.csv", start_token=START_TOKEN, stop_token=STOP_TOKEN
+        f"{dataset_dir}/train.csv",
+        start_token=START_TOKEN,
+        stop_token=STOP_TOKEN,
+        add_decoder_input=True,
+        text_vectorization=text_vectorization,
+        one_hot=True,
+        vocabulary_size=vocabulary_size,
     ).batch(batch_size)
     eval_dataset = TextAutoencoderWikipediaCSVDataset(
-        f"{dataset_dir}/eval.csv", start_token=START_TOKEN, stop_token=STOP_TOKEN
+        f"{dataset_dir}/eval.csv",
+        start_token=START_TOKEN,
+        stop_token=STOP_TOKEN,
+        add_decoder_input=True,
+        text_vectorization=text_vectorization,
+        one_hot=True,
+        vocabulary_size=vocabulary_size,
     ).batch(batch_size)
     test_dataset = TextAutoencoderWikipediaCSVDataset(
-        f"{dataset_dir}/test.csv", start_token=START_TOKEN, stop_token=STOP_TOKEN
+        f"{dataset_dir}/test.csv",
+        start_token=START_TOKEN,
+        stop_token=STOP_TOKEN,
+        add_decoder_input=True,
+        text_vectorization=text_vectorization,
+        one_hot=True,
+        vocabulary_size=vocabulary_size,
     ).batch(batch_size)
     return train_dataset, eval_dataset, test_dataset
 
@@ -308,7 +335,6 @@ def command_line_args():
         "--vocabulary-file",
         required=True,
         type=pathlib.Path,
-        help="This file is not used to build a tokenizer. It is used to get the vocabulary only",
     )
     parser.add_argument(
         "--vocab-size",
@@ -375,13 +401,15 @@ def main():
     vocabulary = load_vocabulary_from_file(
         args.vocabulary_file, vocabulary_size=args.vocab_size
     )
-    text_vectorization = tf.keras.layers.TextVectorization(vocabulary=vocabulary)
+    text_vectorization = tf.keras.layers.TextVectorization(
+        vocabulary=vocabulary, output_sequence_length=args.max_text_length
+    )
+    logging.debug(text_vectorization.get_vocabulary()[:10])
 
     train_dataset, eval_dataset, test_dataset = load_dataset(
-        args.dataset_dir, args.batch_size, text_vectorization
+        args.dataset_dir, args.batch_size, text_vectorization, len(vocabulary)
     )
     logging.info(train_dataset.element_spec)
-    logging.info(list(train_dataset.take(1)))
 
     if args.train:
         model = create_or_load_model(

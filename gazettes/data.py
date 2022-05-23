@@ -63,13 +63,13 @@ def build_and_save_vocabulary(dataset, filepath):
         vocab_file.flush()
 
 
-def load_vocabulary_from_file(filepath, vocab_size: int = None):
+def load_vocabulary_from_file(filepath, vocabulary_size: int = None):
     vocabulary = []
     with open(filepath, "r") as vocab_file:
         for token in vocab_file:
             vocabulary.append(token.strip())
-    if vocab_size is not None and vocab_size > 0:
-        vocabulary = vocabulary[:vocab_size]
+    if vocabulary_size is not None and vocabulary_size > 0:
+        vocabulary = vocabulary[:vocabulary_size]
     return vocabulary
 
 
@@ -177,24 +177,29 @@ class TextAutoencoderWikipediaCSVDataset(tf.data.Dataset):
         batch_size: int = 32,
         num_parallel_calls: int = tf.data.AUTOTUNE,
         deterministic: bool = False,
+        add_decoder_input: bool = False,
+        one_hot: bool = False,
+        vocabulary_size: int = 0,
     ):
-        dataset = tf.data.Dataset.from_generator(
-            load_csv_file_column,
-            args=(csv_file_path, "text"),
-            output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
-        ).prefetch(tf.data.AUTOTUNE)
-
-        dataset = dataset.map(
-            lambda x: (x, x),
-            num_parallel_calls=num_parallel_calls,
-            deterministic=deterministic,
-        )
-
         assert (
             start_token is not None
             and stop_token is not None
             or start_token is None
             and stop_token is None
+        )
+        if one_hot and vocabulary_size <= 0:
+            raise Exception("one_hot and vocabulary_size must be set")
+
+        dataset = tf.data.Dataset.from_generator(
+            load_csv_file_column,
+            args=(csv_file_path, "text"),
+            output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+        )
+
+        dataset = dataset.map(
+            lambda x: (x, x),
+            num_parallel_calls=num_parallel_calls,
+            deterministic=deterministic,
         )
 
         def add_start_stop_tokens(x, y):
@@ -210,22 +215,39 @@ class TextAutoencoderWikipediaCSVDataset(tf.data.Dataset):
         if text_vectorization is not None:
 
             def text_vectorization_function(x, y):
-                return x, text_vectorization(y)
-
-            def add_decoder_input(x, y):
-                return (x, y), y
+                return text_vectorization(x), text_vectorization(y)
 
             dataset = dataset.map(
                 text_vectorization_function,
                 num_parallel_calls=num_parallel_calls,
                 deterministic=deterministic,
-            ).map(
+            )
+            if one_hot:
+
+                def one_hot_function(x, y):
+                    return (
+                        tf.one_hot(x, vocabulary_size),
+                        tf.one_hot(y, vocabulary_size),
+                    )
+
+                dataset = dataset.map(
+                    one_hot_function,
+                    num_parallel_calls=num_parallel_calls,
+                    deterministic=deterministic,
+                )
+
+        if add_decoder_input:
+
+            def add_decoder_input(x, y):
+                return (x, y), y
+
+            dataset = dataset.map(
                 add_decoder_input,
                 num_parallel_calls=num_parallel_calls,
                 deterministic=deterministic,
             )
 
-        return dataset
+        return dataset.prefetch(tf.data.AUTOTUNE)
 
 
 class TextAutoencoderWikipediaDataset(tf.data.Dataset):
