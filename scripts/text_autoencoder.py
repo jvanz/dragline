@@ -56,10 +56,15 @@ def create_model(
         "activation": activation,
         "return_state": True,
     }
-    encoder_outputs, state_h, state_c = tf.keras.layers.LSTM(
-        **encoder_layers_arguments
-    )(encoder_input)
-    encoder_states = (state_h, state_c)
+    if rnn_type == "lstm":
+        encoder_outputs, state_h, state_c = tf.keras.layers.LSTM(
+            **encoder_layers_arguments
+        )(encoder_input)
+        encoder_states = (state_h, state_c)
+    else:
+        encoder_outputs, encoder_states = tf.keras.layers.GRU(
+            **encoder_layers_arguments
+        )(encoder_input)
 
     decoder_input = tf.keras.Input(
         shape=(
@@ -75,9 +80,14 @@ def create_model(
         "activation": activation,
         "return_state": True,
     }
-    decoder_output, _, _ = tf.keras.layers.LSTM(**decoder_layer_arguments)(
-        decoder_input, initial_state=encoder_states
-    )
+    if rnn_type == "lstm":
+        decoder_output, _, _ = tf.keras.layers.LSTM(**decoder_layer_arguments)(
+            decoder_input, initial_state=encoder_states
+        )
+    else:
+        decoder_output, _ = tf.keras.layers.GRU(**decoder_layer_arguments)(
+            decoder_input, initial_state=encoder_states
+        )
     decoder_output = tf.keras.layers.Dense(len(vocabulary), activation="softmax")(
         decoder_output
     )

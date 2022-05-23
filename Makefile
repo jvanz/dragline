@@ -61,6 +61,7 @@ train-lstm-autoencoder: VOCAB_SIZE=10000
 train-lstm-autoencoder: tests
 	PYTHONPATH=$(PWD) TF_GPU_THREAD_MODE=gpu_private python scripts/text_autoencoder.py \
 		--batch-size $(BATCH_SIZE) \
+		--bidirectional-hidden-layers \
 		--dataset-dir $(WIKIPEDIA_DATA_DIR) \
 		--embedding-dimensions 50 \
 		--embedding-file "$(DATA_DIR)/wikipedia/embeddings.txt" \
@@ -71,13 +72,12 @@ train-lstm-autoencoder: tests
 		--rnn-type lstm \
 		--save-model-at models/lstm-autoencoder \
 		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
-		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/vocabulary \
 		--vocab-size $(VOCAB_SIZE) \
+		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/vocabulary \
 		--from-scratch --train --evaluate
-		# --bidirectional-hidden-layers \
 
 .PHONY: train-gru-autoencoder
-train-gru-autoencoder: VOCAB_SIZE=12400
+train-gru-autoencoder: VOCAB_SIZE=10000
 train-gru-autoencoder: tests
 	TF_GPU_THREAD_MODE='gpu_private'  PYTHONPATH=$(PWD) \
 		python scripts/text_autoencoder.py \
@@ -91,10 +91,10 @@ train-gru-autoencoder: tests
 		--learning-rate $(LEARNING_RATE) \
 		--model-name gru-autoencoder \
 		--rnn-type gru \
-		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/vocabulary \
-		--vocab-size $(VOCAB_SIZE) \
-		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
 		--save-model-at models/gru-autoencoder \
+		--tokenizer-config-file $(WIKIPEDIA_DATA_DIR)/tokenizer.json \
+		--vocab-size $(VOCAB_SIZE) \
+		--vocabulary-file $(WIKIPEDIA_DATA_DIR)/vocabulary \
 		--train --evaluate
 
 
