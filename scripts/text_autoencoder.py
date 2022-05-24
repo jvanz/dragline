@@ -225,7 +225,7 @@ def load_dataset(dataset_dir: str, batch_size, text_vectorization, vocabulary_si
         vocabulary_size=vocabulary_size,
     ).batch(batch_size)
     eval_dataset = TextAutoencoderWikipediaCSVDataset(
-        f"{dataset_dir}/eval.csv",
+        f"{dataset_dir}/evaluation.csv",
         start_token=START_TOKEN,
         stop_token=STOP_TOKEN,
         add_decoder_input=True,
