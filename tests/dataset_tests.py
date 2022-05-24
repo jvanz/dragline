@@ -464,8 +464,6 @@ class TextAutoencoderWikipediaDatasetCSVTests(unittest.TestCase):
                 ),
             ]
 
-            print(data)
-            print(expected_output)
             for output, expected in zip(data, expected_output):
                 self.assertTrue(np.array_equal(output[0][0], expected[0][0]))
                 self.assertTrue(np.array_equal(output[0][1], expected[0][1]))
@@ -490,44 +488,84 @@ class TextAutoencoderWikipediaDatasetCSVTests(unittest.TestCase):
 
             dataset = TextAutoencoderWikipediaCSVDataset(
                 csv_file.name,
-                start_token=START_TOKEN,
-                stop_token=STOP_TOKEN,
                 text_vectorization=text_vectorization,
                 deterministic=True,
                 add_decoder_input=False,
                 one_hot=True,
-                vocabulary_size=7,
+                vocabulary_size=len(text_vectorization.get_vocabulary()),
             )
 
             self.assertIsNotNone(dataset)
             data = list(dataset.as_numpy_iterator())
             expected_output = [
                 (
-                    [
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    ],
-                    [
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    ],
+                    np.array(
+                        [
+                            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                        ]
+                    ),
+                    np.array(
+                        [
+                            [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                            [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                            [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                        ]
+                    ),
                 )
             ]
-            # Jkprint(data)
-            # Jkprint(expected_output)
-            # Jkfor output, expected in zip(data, expected_output):
-            # Jk    self.assertTrue(np.array_equal(output[0], expected[0]))
-            # Jk    self.assertTrue(np.array_equal(output[1], expected[1]))
+            for output, expected in zip(data, expected_output):
+                self.assertTrue(np.array_equal(output[0], expected[0]))
+                self.assertTrue(np.array_equal(output[1], expected[1]))
+
+    def test_invalid_text(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf8", delete=True) as csv_file:
+            dataset = ["This is the first row", ", , , ,", "   "]
+            data = {"text": dataset}
+            self.write_csv_file(csv_file, data)
+
+            def get_dataset():
+                for sample in dataset:
+                    yield sample
+
+            text_vectorization = tf.keras.layers.TextVectorization(
+                output_sequence_length=20
+            )
+            text_vectorization.adapt(
+                tf.data.Dataset.from_generator(
+                    get_dataset,
+                    output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+                )
+            )
+
+            dataset = TextAutoencoderWikipediaCSVDataset(
+                csv_file.name,
+                start_token=START_TOKEN,
+                stop_token=STOP_TOKEN,
+                text_vectorization=text_vectorization,
+                deterministic=True,
+            )
+
+            self.assertIsNotNone(dataset)
+            data = list(dataset.as_numpy_iterator())
+            expected_output = [
+                (
+                    text_vectorization(tf.constant(f"This is the first row")).numpy(),
+                    text_vectorization(
+                        tf.constant(f"{START_TOKEN} This is the first row {STOP_TOKEN}")
+                    ).numpy(),
+                ),
+            ]
+            self.assertEqual(len(data), len(expected_output))
+            for output, expected in zip(data, expected_output):
+                self.assertTrue(np.array_equal(output[0][0], expected[0][0]))
+                self.assertTrue(np.array_equal(output[0][1], expected[0][1]))
+                self.assertTrue(np.array_equal(output[1], expected[1]))
 
 
 class TensorflowTests(unittest.TestCase):

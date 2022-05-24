@@ -5,6 +5,7 @@ import sys
 import csv
 from urllib.parse import urlparse
 import logging
+import string
 
 from bs4 import BeautifulSoup
 import numpy as np
@@ -111,10 +112,13 @@ def load_csv_file_column(csvfile_name: str, column: str):
         csvfile_name = str(csvfile_name, "utf8")
     if type(column) is not str:
         column = str(column, "utf8")
+    translate_table = str.maketrans("", "", string.punctuation)
     with open(csvfile_name) as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            yield row[column]
+            if len(row[column].translate(translate_table).strip()) == 0:
+                continue
+            yield row[column].strip()
 
 
 class WikipediaDataset(tf.data.Dataset):

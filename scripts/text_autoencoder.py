@@ -97,7 +97,7 @@ def create_model(
     )
 
     loss = tf.keras.losses.CategoricalCrossentropy()
-    optimizer = tf.keras.optimizers.RMSprop(learning_rate)
+    optimizer = tf.keras.optimizers.Adam(learning_rate)
     metrics = [tf.keras.metrics.CategoricalCrossentropy(), "accuracy"]
 
     model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
