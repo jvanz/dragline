@@ -1,127 +1,49 @@
-from transformers import AutoTokenizer
+import os
+import csv
+import json
+
+import torch
 
 
-def load_bert_tokenizer(model_checkpoint: str, vocab_file: str):
-    return AutoTokenizer.from_pretrained(
-        model_checkpoint,
-        use_fast=False,
-        vocab_file=vocab_file,
-        clean_text=True,
-        do_lower_case=True,
-    )
-
-
-class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
-    def __new__(
-        cls,
-        data_dir: str,
-        batch_size: int = 1000,
-        max_text_length: int = 64,
-        vocabulary: str = None,
-        vocabulary_size: int = 0,
-        num_parallel_calls: int = tf.data.AUTOTUNE,
-        model_checkpoint: str = "neuralmind/bert-base-portuguese-cased",
+class BertDataset(torch.utils.data.IterableDataset):
+    def __init__(
+        self,
+        datafile: str,
+        metadatafile: str = None,
+        tokenizer=None,
+        max_sequence_length: int = None,
+        truncation: bool = None,
+        padding: str = None,
+        add_target: bool = False,
     ):
-        dataset = WikipediaDataset(data_dir)
-        tokenizer = load_bert_tokenizer(model_checkpoint, vocabulary)
+        assert os.path.exists(datafile)
+        self.datafile = datafile
+        self.tokenizer = tokenizer
+        self.add_target = add_target
+        self.tokenizer_args = {"add_special_tokens": True, "return_tensors": "pt"}
+        if max_sequence_length:
+            self.tokenizer_args["max_length"] = max_sequence_length
+        if truncation:
+            self.tokenizer_args["truncation"] = truncation
+        if padding:
+            self.tokenizer_args["padding"] = padding
+        if metadatafile:
+            with open(metadatafile, "r") as metadata:
+                self.metadata = json.load(metadata)
 
-        def preprocess_text(text):
-            tokenizer_output = tokenizer(
-                text.numpy().decode("utf8"),
-                padding="max_length",
-                truncation=True,
-                max_length=max_text_length,
-            )
-            return (
-                tokenizer_output["input_ids"],
-                tokenizer_output["token_type_ids"],
-                tokenizer_output["attention_mask"],
-                tokenizer_output["input_ids"],
-            )
+    def __len__(self):
+        assert self.metadata is not None
+        dataset_name = os.path.splitext(os.path.basename(self.datafile))[0]
+        return self.metadata[dataset_name]["length"]
 
-        def tf_python_preprocess_text(text):
-            preprocessed_text = tf.py_function(
-                preprocess_text,
-                [text],
-                [
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="input_ids"
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,),
-                        dtype=tf.int32,
-                        name="token_type_ids",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,),
-                        dtype=tf.int32,
-                        name="attention_mask",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="target"
-                    ),
-                ],
-            )
-            return [
-                tf.reshape(
-                    tensor,
-                    [
-                        max_text_length,
-                    ],
-                )
-                for tensor in preprocessed_text
-            ]
-
-        def tf_preprocess_text(batch):
-            return tf.map_fn(
-                fn=tf_python_preprocess_text,
-                elems=batch,
-                fn_output_signature=[
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="input_ids"
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,),
-                        dtype=tf.int32,
-                        name="token_type_ids",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,),
-                        dtype=tf.int32,
-                        name="attention_mask",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="target"
-                    ),
-                ],
-            )
-
-        dataset = dataset.map(
-            tf_preprocess_text,
-            num_parallel_calls=num_parallel_calls,
-            deterministic=False,
-        )
-        if has_cache_enable():
-            dataset.cache(
-                get_cache_dir(data_dir, "transformer_preprocessing"),
-            )
-
-        def organize_targets(input_ids, token_type_ids, attention_mask, target):
-            return (
-                (input_ids, token_type_ids, attention_mask),
-                target,
-                # tf.one_hot(target, vocabulary_size),
-            )
-
-        def onehot_target(inputs, target):
-            return (
-                inputs,
-                tf.one_hot(target, vocabulary_size),
-            )
-
-        dataset = dataset.map(organize_targets)
-        logging.info(dataset.element_spec)
-        dataset = dataset.map(onehot_target)
-        if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, "transformer_one_hot_target"))
-        return dataset
+    def __iter__(self):
+        with open(self.datafile, "r") as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                sample = row["text"]
+                if self.tokenizer:
+                    sample = self.tokenizer(sample, **self.tokenizer_args).input_ids[0]
+                if self.add_target:
+                    yield sample, sample
+                else:
+                    yield sample
