@@ -286,7 +286,7 @@ def main():
         eval_dataset=eval_dataset,
         compute_metrics=compute_metrics,
     )
-    trainer.train()
+    trainer.train(resume_from_checkpoint=True)
     train_torch_model(
         model,
         train_dataset,
