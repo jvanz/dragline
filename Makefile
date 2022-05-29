@@ -25,7 +25,7 @@ WIKIPEDIA_DATASET_SIZE ?= 1.0
 WIKIPEDIA_DATA_DIR ?= "$(DATA_DIR)/wikipedia"
 PATIENCE ?= 20
 LEARNING_RATE ?= 0.00001
-
+TRANSFORMER_ADDITIONAL_ARGS ?=
 
 python_script = PYTHONPATH=$(PWD) \
 	BATCH_SIZE=$(BATCH_SIZE) \
@@ -106,8 +106,8 @@ train-transformer-autoencoder: format
 		--do_train \
 		--log_level debug \
 		--logging_dir ./logs \
-		--no_cuda \
 		--output_dir checkpoints/transformer_autoencoder \
+		$(TRANSFORMER_ADDITIONAL_ARGS) \
 		--save_total_limit 5
 
 .PHONY: download_wikipedia_dataset
