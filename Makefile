@@ -99,9 +99,16 @@ train-gru-autoencoder: tests
 
 
 .PHONY: train-transformer-autoencoder
-train-transformer-autoencoder:
+train-transformer-autoencoder: format
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder_transformer.py \
-		--data-dir "$(DATA_DIR)/wikipedia"
+		--data-dir "$(DATA_DIR)/wikipedia" \
+		--dataloader_num_workers 4 \
+		--do_train \
+		--log_level debug \
+		--logging_dir ./logs \
+		--no_cuda \
+		--output_dir checkpoints/transformer_autoencoder \
+		--save_total_limit 5
 
 .PHONY: download_wikipedia_dataset
 download_wikipedia_dataset: tests

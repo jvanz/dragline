@@ -11,7 +11,12 @@ from transformers import (
     BertGenerationDecoder,
     AutoTokenizer,
     BertTokenizer,
+    Seq2SeqTrainingArguments,
+    Seq2SeqTrainer,
+    HfArgumentParser,
 )
+from datasets import load_metric, load_dataset
+from datasets.fingerprint import Hasher
 
 import numpy as np
 import torch
@@ -47,7 +52,70 @@ def create_model(tokenizer):
     return model
 
 
-def load_datasets(data_dir, tokenizer):
+def tokenize_function(examples, tokenizer=None):
+    return tokenizer(
+        examples["text"],
+        padding="max_length",
+        truncation=True,
+        max_length=20,
+        add_special_tokens=True,
+    )
+
+
+def reorganize_features(examples):
+    examples["decoder_input_ids"] = examples["input_ids"]
+    examples["labels"] = examples["input_ids"]
+    return examples
+
+
+def load_huggingface_datasets(data_dir, tokenizer):
+
+    train_dataset = load_dataset("csv", data_files=f"{data_dir}/train.csv")
+    train_dataset = train_dataset.map(
+        tokenize_function,
+        batched=True,
+        num_proc=os.cpu_count(),
+        fn_kwargs={"tokenizer": tokenizer},
+    )
+    train_dataset = train_dataset.map(
+        reorganize_features,
+        batched=True,
+        num_proc=os.cpu_count(),
+        remove_columns=["text", "token_type_ids", "attention_mask"],
+    )
+
+    evaluation_dataset = load_dataset("csv", data_files=f"{data_dir}/evaluation.csv")
+    evaluation_dataset = evaluation_dataset.map(
+        tokenize_function,
+        batched=True,
+        num_proc=os.cpu_count(),
+        fn_kwargs={"tokenizer": tokenizer},
+    )
+    evaluation_dataset = evaluation_dataset.map(
+        reorganize_features,
+        batched=True,
+        num_proc=os.cpu_count(),
+        remove_columns=["text", "token_type_ids", "attention_mask"],
+    )
+
+    test_dataset = load_dataset("csv", data_files=f"{data_dir}/test.csv")
+    test_dataset = test_dataset.map(
+        tokenize_function,
+        batched=True,
+        num_proc=os.cpu_count(),
+        fn_kwargs={"tokenizer": tokenizer},
+    )
+    test_dataset = test_dataset.map(
+        reorganize_features,
+        batched=True,
+        num_proc=os.cpu_count(),
+        remove_columns=["text", "token_type_ids", "attention_mask"],
+    )
+
+    return train_dataset["train"], evaluation_dataset["train"], test_dataset["train"]
+
+
+def load_datasets(data_dir, tokenizer, batch_size: int = 16):
     train_dataset = BertDataset(
         f"{data_dir}/train.csv",
         metadatafile=f"{data_dir}/metadata.json",
@@ -76,9 +144,9 @@ def load_datasets(data_dir, tokenizer):
         add_target=True,
     )
     return (
-        DataLoader(train_dataset, batch_size=32),
-        DataLoader(eval_dataset, batch_size=32),
-        DataLoader(test_dataset, batch_size=32),
+        DataLoader(train_dataset, batch_size=16),
+        DataLoader(eval_dataset, batch_size=16),
+        DataLoader(test_dataset, batch_size=16),
     )
 
 
@@ -88,13 +156,14 @@ def get_checkpoint_dir(model):
     return checkpoint_dir
 
 
-def train_loop(dataset, model, loss_fn, optimizer, device):
+def train_loop(dataset, model, loss_fn, optimizer, device, epoch, checkpoint_dir):
     size = len(dataset.dataset)
     for batch, (inputs, expected_prediction) in enumerate(dataset):
         inputs = inputs.to(device)
         expected_prediction = expected_prediction.to(device)
 
         output = model(input_ids=inputs, decoder_input_ids=inputs, labels=inputs)
+
         loss = output.loss
 
         optimizer.zero_grad()
@@ -104,6 +173,15 @@ def train_loop(dataset, model, loss_fn, optimizer, device):
         if batch % 100 == 0:
             loss, current = loss.item(), batch * len(inputs)
             print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": loss,
+                },
+                f"{checkpoint_dir}/model.pt",
+            )
 
 
 def test_loop(dataset, model, loss_fn):
@@ -122,31 +200,41 @@ def test_loop(dataset, model, loss_fn):
     )
 
 
-def train_torch_model(model, train_dataset, eval_dataset, test_dataset, device):
+def train_torch_model(
+    model, train_dataset, eval_dataset, test_dataset, device, checkpoint_dir: str = None
+):
     loss_fn = torch.nn.MSELoss
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
     for epoch in range(EPOCHS):
         print(f"Epoch {epoch+1}/{EPOCHS}\n--------------------------")
-        train_loop(train_dataset, model, loss_fn, optimizer, device)
+        train_loop(
+            train_dataset, model, loss_fn, optimizer, device, epoch, checkpoint_dir
+        )
         test_loop(eval_dataset, model, loss_fn)
         torch.save(model, "models/text_transformer_autoencoder.pth")
     print("Done!")
 
 
 def parse_command_line_arguments():
-    parser = argparse.ArgumentParser()
+    parser = HfArgumentParser(Seq2SeqTrainingArguments)
+
     parser.add_argument(
         "--data-dir",
         required=True,
         type=pathlib.Path,
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args_into_dataclasses()
 
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-    args = parse_command_line_arguments()
+    logging.basicConfig(level=logging.DEBUG)
+    training_args, additional_args = parse_command_line_arguments()
+    logging.debug(training_args)
+    logging.debug(additional_args)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using {device} device")
+    os.makedirs(training_args.output_dir, exist_ok=True)
 
     if torch.cuda.is_available():
         logging.info("CUDA is available")
@@ -163,10 +251,50 @@ def main():
         eos_token_id=102,
     )
 
-    train_dataset, eval_dataset, test_dataset = load_datasets(args.data_dir, tokenizer)
+    # train_dataset, eval_dataset, test_dataset = load_datasets(
+    #     args.data_dir, tokenizer, batch_size=args.batch_size
+    # )
+    train_dataset, eval_dataset, test_dataset = load_huggingface_datasets(
+        additional_args.data_dir, tokenizer
+    )
+    logging.debug(train_dataset[0])
+    logging.debug(eval_dataset[0])
+    logging.debug(test_dataset[0])
+
     model = create_model(tokenizer)
     model.to(device)
-    train_torch_model(model, train_dataset, eval_dataset, test_dataset, device)
+    # training_args = Seq2SeqTrainingArguments(
+    #     output_dir="checkpoints/transformer_autoencoder",
+    #     evaluation_strategy="epoch",
+    #     log_level="debug",
+    #     save_total_limit=10,
+    #     gradient_accumulation_steps=500,
+    #     num_train_epochs=args.epochs,
+    #     disable_tqdm=False,
+    # )
+    metric = load_metric("accuracy")
+
+    def compute_metrics(eval_pred):
+        logits, labels = eval_pred
+        predictions = np.argmax(logits, axis=-1)
+        return metric.compute(predictions=predictions, references=labels)
+
+    trainer = Seq2SeqTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        compute_metrics=compute_metrics,
+    )
+    trainer.train()
+    train_torch_model(
+        model,
+        train_dataset,
+        eval_dataset,
+        test_dataset,
+        device,
+        checkpoint_dir=args.checkpoint_dir,
+    )
 
 
 if __name__ == "__main__":
