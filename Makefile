@@ -111,7 +111,7 @@ train-transformer-autoencoder: format
 		--output_dir checkpoints/transformer_autoencoder \
 		--save_total_limit 5 \
 		--tokenizer_name  "neuralmind/bert-base-portuguese-cased" \
-		--dataset_partial_load 0.0001 \
+		--dataset_partial_load 0.2 \
 		$(TRANSFORMER_ADDITIONAL_ARGS)
 
 .PHONY: download_wikipedia_dataset
