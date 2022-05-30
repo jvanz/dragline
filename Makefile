@@ -112,6 +112,7 @@ train-transformer-autoencoder: format
 		--save_total_limit 5 \
 		--tokenizer_name  "neuralmind/bert-base-portuguese-cased" \
 		--dataset_partial_load 0.2 \
+		--resume_training false \
 		--per_device_eval_batch_size=$(BATCH_SIZE) \
 		--per_device_train_batch_size=$(BATCH_SIZE) \
 		$(TRANSFORMER_ADDITIONAL_ARGS)
