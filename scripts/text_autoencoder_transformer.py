@@ -1,9 +1,11 @@
-import os
-import logging
+from dataclasses import dataclass, field
 import argparse
-import json
-import pathlib
 import csv
+import json
+import logging
+import os
+import pathlib
+import string
 
 from transformers import (
     EncoderDecoderModel,
@@ -25,19 +27,44 @@ from torch.utils.data import DataLoader
 from gazettes.transformer import BertDataset
 
 EPOCHS = int(os.environ.get("EPOCHS", 10))
-MODEL_CHECKPOINT = os.environ.get(
-    "MODEL_CHECKPOINT", "neuralmind/bert-base-portuguese-cased"
-)
 
 
-def create_model(tokenizer):
+@dataclass
+class ModelArguments:
+    """
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
+    """
+
+    model_name_or_path: str = field(
+        metadata={
+            "help": "Path to pretrained model or model identifier from huggingface.co/models"
+        }
+    )
+    tokenizer_name: str = field(metadata={"help": "Pretrained tokenizer name or path"})
+    resume_training: bool = field(default=True)
+
+
+@dataclass
+class DataArguments:
+    """
+    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
+    """
+
+    data_dir: str = field(
+        metadata={"help": "Path to directory storing the dataset files"}
+    )
+    dataset_partial_load: float = field(default=1.0)
+    shuffle_dataset: bool = field(default=True)
+
+
+def create_model(tokenizer, model_name_or_path):
     encoder = BertGenerationEncoder.from_pretrained(
-        MODEL_CHECKPOINT, bos_token_id=103, eos_token_id=102
+        model_name_or_path, bos_token_id=103, eos_token_id=102
     )
 
     # add cross attention layers and use BERT's cls token as BOS token and sep token as EOS token
     decoder = BertGenerationDecoder.from_pretrained(
-        MODEL_CHECKPOINT,
+        model_name_or_path,
         add_cross_attention=True,
         is_decoder=True,
         bos_token_id=101,
@@ -62,15 +89,27 @@ def tokenize_function(examples, tokenizer=None):
     )
 
 
+def valid_string(string_value):
+    translate_table = str.maketrans("", "", string.punctuation)
+    return len(string_value.translate(translate_table).strip()) > 0
+
+
+def filter_invalid_string(examples):
+    return [valid_string(example) for example in examples["text"]]
+
+
 def reorganize_features(examples):
     examples["decoder_input_ids"] = examples["input_ids"]
     examples["labels"] = examples["input_ids"]
     return examples
 
 
-def load_huggingface_datasets(data_dir, tokenizer):
+def load_huggingface_datasets(data_dir, tokenizer, partial_dataset_load, shuffle):
 
     train_dataset = load_dataset("csv", data_files=f"{data_dir}/train.csv")
+    train_dataset = train_dataset.filter(
+        filter_invalid_string, batched=True, num_proc=os.cpu_count()
+    )
     train_dataset = train_dataset.map(
         tokenize_function,
         batched=True,
@@ -82,9 +121,17 @@ def load_huggingface_datasets(data_dir, tokenizer):
         batched=True,
         num_proc=os.cpu_count(),
         remove_columns=["text", "token_type_ids", "attention_mask"],
+    )
+    if shuffle:
+        train_dataset = train_dataset.shuffle()
+    train_dataset = train_dataset["train"].select(
+        range(int(train_dataset["train"].num_rows * partial_dataset_load))
     )
 
     evaluation_dataset = load_dataset("csv", data_files=f"{data_dir}/evaluation.csv")
+    evaluation_dataset = evaluation_dataset.filter(
+        filter_invalid_string, batched=True, num_proc=os.cpu_count()
+    )
     evaluation_dataset = evaluation_dataset.map(
         tokenize_function,
         batched=True,
@@ -96,9 +143,17 @@ def load_huggingface_datasets(data_dir, tokenizer):
         batched=True,
         num_proc=os.cpu_count(),
         remove_columns=["text", "token_type_ids", "attention_mask"],
+    )
+    if shuffle:
+        evaluation_dataset = evaluation_dataset.shuffle()
+    evaluation_dataset = evaluation_dataset["train"].select(
+        range(int(evaluation_dataset["train"].num_rows * partial_dataset_load))
     )
 
     test_dataset = load_dataset("csv", data_files=f"{data_dir}/test.csv")
+    test_dataset = test_dataset.filter(
+        filter_invalid_string, batched=True, num_proc=os.cpu_count()
+    )
     test_dataset = test_dataset.map(
         tokenize_function,
         batched=True,
@@ -111,8 +166,13 @@ def load_huggingface_datasets(data_dir, tokenizer):
         num_proc=os.cpu_count(),
         remove_columns=["text", "token_type_ids", "attention_mask"],
     )
+    if shuffle:
+        test_dataset = test_dataset.shuffle()
+    test_dataset = test_dataset["train"].select(
+        range(int(test_dataset["train"].num_rows * partial_dataset_load))
+    )
 
-    return train_dataset["train"], evaluation_dataset["train"], test_dataset["train"]
+    return train_dataset, evaluation_dataset, test_dataset
 
 
 def load_datasets(data_dir, tokenizer, batch_size: int = 16):
@@ -216,21 +276,16 @@ def train_torch_model(
 
 
 def parse_command_line_arguments():
-    parser = HfArgumentParser(Seq2SeqTrainingArguments)
-
-    parser.add_argument(
-        "--data-dir",
-        required=True,
-        type=pathlib.Path,
-    )
+    parser = HfArgumentParser((ModelArguments, DataArguments, Seq2SeqTrainingArguments))
     return parser.parse_args_into_dataclasses()
 
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    training_args, additional_args = parse_command_line_arguments()
+    model_args, data_args, training_args = parse_command_line_arguments()
+    logging.debug(model_args)
+    logging.debug(data_args)
     logging.debug(training_args)
-    logging.debug(additional_args)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using {device} device")
@@ -244,34 +299,28 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = BertTokenizer.from_pretrained(
-        MODEL_CHECKPOINT,
+        model_args.model_name_or_path,
         do_lower_case=False,
         use_fast=False,
         bos_token_id=101,
         eos_token_id=102,
     )
 
-    # train_dataset, eval_dataset, test_dataset = load_datasets(
-    #     args.data_dir, tokenizer, batch_size=args.batch_size
-    # )
     train_dataset, eval_dataset, test_dataset = load_huggingface_datasets(
-        additional_args.data_dir, tokenizer
+        data_args.data_dir,
+        tokenizer,
+        data_args.dataset_partial_load,
+        data_args.shuffle_dataset,
     )
+    logging.debug(train_dataset)
     logging.debug(train_dataset[0])
+    logging.debug(eval_dataset)
     logging.debug(eval_dataset[0])
+    logging.debug(test_dataset)
     logging.debug(test_dataset[0])
 
-    model = create_model(tokenizer)
+    model = create_model(tokenizer, model_args.model_name_or_path)
     model.to(device)
-    # training_args = Seq2SeqTrainingArguments(
-    #     output_dir="checkpoints/transformer_autoencoder",
-    #     evaluation_strategy="epoch",
-    #     log_level="debug",
-    #     save_total_limit=10,
-    #     gradient_accumulation_steps=500,
-    #     num_train_epochs=args.epochs,
-    #     disable_tqdm=False,
-    # )
     metric = load_metric("accuracy")
 
     def compute_metrics(eval_pred):
@@ -286,15 +335,15 @@ def main():
         eval_dataset=eval_dataset,
         compute_metrics=compute_metrics,
     )
-    trainer.train(resume_from_checkpoint=True)
-    train_torch_model(
-        model,
-        train_dataset,
-        eval_dataset,
-        test_dataset,
-        device,
-        checkpoint_dir=args.checkpoint_dir,
-    )
+    trainer.train(resume_from_checkpoint=model_args.resume_training)
+    # train_torch_model(
+    #     model,
+    #     train_dataset,
+    #     eval_dataset,
+    #     test_dataset,
+    #     device,
+    #     checkpoint_dir=args.checkpoint_dir,
+    # )
 
 
 if __name__ == "__main__":

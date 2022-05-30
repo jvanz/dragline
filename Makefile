@@ -101,14 +101,18 @@ train-gru-autoencoder: tests
 .PHONY: train-transformer-autoencoder
 train-transformer-autoencoder: format
 	PYTHONPATH=$(PWD) python scripts/text_autoencoder_transformer.py \
-		--data-dir "$(DATA_DIR)/wikipedia" \
+		--data_dir "$(DATA_DIR)/wikipedia" \
 		--dataloader_num_workers 4 \
 		--do_train \
 		--log_level debug \
 		--logging_dir ./logs \
+		--model_name_or_path "neuralmind/bert-base-portuguese-cased" \
+		--num_train_epochs $(EPOCHS) \
 		--output_dir checkpoints/transformer_autoencoder \
-		$(TRANSFORMER_ADDITIONAL_ARGS) \
-		--save_total_limit 5
+		--save_total_limit 5 \
+		--tokenizer_name  "neuralmind/bert-base-portuguese-cased" \
+		--dataset_partial_load 0.0001 \
+		$(TRANSFORMER_ADDITIONAL_ARGS)
 
 .PHONY: download_wikipedia_dataset
 download_wikipedia_dataset: tests

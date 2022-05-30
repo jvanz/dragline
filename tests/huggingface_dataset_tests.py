@@ -1,5 +1,6 @@
 import unittest
 import tempfile
+import string
 import json
 import csv
 import os
@@ -20,6 +21,11 @@ def missing_datasets():
     except:
         return True
     return False
+
+
+def valid_string(string_value):
+    translate_table = str.maketrans("", "", string.punctuation)
+    return len(string_value.translate(translate_table).strip()) > 0
 
 
 @unittest.skipIf(missing_datasets(), "No Datasets lib detected. Skipping test.")
@@ -67,3 +73,29 @@ class HuggingFacesDatasetTests(unittest.TestCase):
             dataset["train"].column_names,
             ["text", "input_ids", "token_type_ids", "attention_mask"],
         )
+
+    def test_invalid_text(self):
+        data = ["This is the first row", ", , , ,", "   "]
+        csv_file = self.write_csv_file(data)
+        dataset = load_dataset("csv", data_files=csv_file)
+        self.assertEqual(dataset["train"].num_rows, 2)
+
+        def invalid_string(examples):
+            return [valid_string(example) for example in examples["text"]]
+
+        dataset = dataset.filter(invalid_string, batched=True)
+        self.assertEqual(dataset["train"].num_rows, 1)
+
+        data = [
+            "Comunas da Alta Saboia",
+            "As garantias de TCP envolvem retransmissão e espera de dados, como consequência, intensificam os efeitos de uma alta latência de rede",
+            "Dois anos depois, a formação passa a ter licença belga",
+            "Savola inen participou de seis edições dos Jogos Olímpicos, de 1928 a 1952",
+            "A delegação tinha o objetivo de conquistar 19 medalhas e ficar entre os 12 mais nesse critério",
+        ]
+
+        csv_file = self.write_csv_file(data)
+        dataset = load_dataset("csv", data_files=csv_file)
+        self.assertEqual(dataset["train"].num_rows, len(data))
+        dataset = dataset.filter(invalid_string, batched=True)
+        self.assertEqual(dataset["train"].num_rows, len(data))
