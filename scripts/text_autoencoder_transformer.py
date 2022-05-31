@@ -57,25 +57,10 @@ class DataArguments:
     shuffle_dataset: bool = field(default=True)
 
 
-def create_model(tokenizer, model_name_or_path):
-    encoder = BertGenerationEncoder.from_pretrained(
-        model_name_or_path, bos_token_id=103, eos_token_id=102
+def create_model(model_name_or_path):
+    model = EncoderDecoderModel.from_encoder_decoder_pretrained(
+        model_name_or_path, model_name_or_path
     )
-
-    # add cross attention layers and use BERT's cls token as BOS token and sep token as EOS token
-    decoder = BertGenerationDecoder.from_pretrained(
-        model_name_or_path,
-        add_cross_attention=True,
-        is_decoder=True,
-        bos_token_id=101,
-        eos_token_id=102,
-    )
-    model = EncoderDecoderModel(encoder=encoder, decoder=decoder)
-
-    model.config.decoder_start_token_id = tokenizer.cls_token_id
-    model.config.pad_token_id = tokenizer.pad_token_id
-    model.config.vocab_size = model.config.decoder.vocab_size
-
     return model
 
 
@@ -319,7 +304,7 @@ def main():
     logging.debug(test_dataset)
     logging.debug(test_dataset[0])
 
-    model = create_model(tokenizer, model_args.model_name_or_path)
+    model = create_model(model_args.model_name_or_path)
     model.to(device)
     metric = load_metric("accuracy")
 
