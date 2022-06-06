@@ -25,8 +25,10 @@ model.config.decoder_start_token_id = tokenizer.cls_token_id
 model.config.pad_token_id = tokenizer.pad_token_id
 model.config.vocab_size = model.config.decoder.vocab_size
 
-dataset = load_dataset("bookcorpus", streaming=True)
+dataset = load_dataset("bookcorpus", streaming=False)
 print(dataset)
+small_train_dataset = dataset["train"].shuffle(seed=42).select(range(dataset_size))
+small_eval_dataset = dataset["train"].shuffle(seed=42).select(range(dataset_size))
 
 
 def tokenize_function(examples):
@@ -37,25 +39,36 @@ def add_input_ids_and_labels(examples):
     return {"input_ids": examples["input_ids"], "labels": examples["input_ids"]}
 
 
-# dataset = dataset.map(tokenize_function, batched=True, num_proc=os.cpu_count())
-dataset = dataset.map(tokenize_function, batched=True)
-# dataset = dataset.map(add_input_ids_and_labels, batched=True, num_proc=os.cpu_count())
-dataset = dataset.map(add_input_ids_and_labels, batched=True)
-dataset = dataset.remove_columns("text")
-dataset = dataset.with_format("torch")
+small_train_dataset = small_train_dataset.map(
+    tokenize_function, batched=True, num_proc=os.cpu_count()
+)
+# small_train_dataset = small_train_dataset.map(tokenize_function, batched=True)
+small_train_dataset = small_train_dataset.map(
+    add_input_ids_and_labels, batched=True, num_proc=os.cpu_count()
+)
+# small_train_dataset = small_train_dataset.map(add_input_ids_and_labels, batched=True)
+small_train_dataset = small_train_dataset.remove_columns("text")
+small_train_dataset = small_train_dataset.with_format("torch")
+
+small_eval_dataset = small_eval_dataset.map(
+    tokenize_function, batched=True, num_proc=os.cpu_count()
+)
+# small_eval_dataset = small_eval_dataset.map(tokenize_function, batched=True)
+small_eval_dataset = small_eval_dataset.map(
+    add_input_ids_and_labels, batched=True, num_proc=os.cpu_count()
+)
+# small_eval_dataset = small_eval_dataset.map(add_input_ids_and_labels, batched=True)
+small_eval_dataset = small_eval_dataset.remove_columns("text")
+small_eval_dataset = small_eval_dataset.with_format("torch")
 
 print("Dataset ready.")
 
-print("Preparing datasets for training...")
-# small_train_dataset = dataset["train"].shuffle(seed=42).select(range(dataset_size))
-# small_eval_dataset = dataset["train"].shuffle(seed=42).select(range(dataset_size))
 
-small_train_dataset = dataset["train"].shuffle(seed=42).take(dataset_size)
-small_eval_dataset = dataset["train"].shuffle(seed=42).take(dataset_size)
 print(small_train_dataset)
+print(small_eval_dataset)
 
 
-training_args = TrainingArguments(output_dir="test_trainer", max_steps=dataset_size / 8)
+training_args = TrainingArguments(output_dir="test_trainer")
 metric = load_metric("accuracy")
 
 
