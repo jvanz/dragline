@@ -38,11 +38,8 @@ def add_input_ids_and_labels(examples):
 
 
 dataset = dataset.map(tokenize_function, batched=True, num_proc=os.cpu_count())
-dataset = dataset.map(tokenize_function, batched=True)
 dataset = dataset.map(add_input_ids_and_labels, batched=True, num_proc=os.cpu_count())
-dataset = dataset.map(add_input_ids_and_labels, batched=True)
 dataset = dataset.remove_columns("text")
-dataset = dataset.with_format("torch")
 
 print("Dataset ready.")
 print(dataset["train"][0])
