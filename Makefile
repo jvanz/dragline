@@ -45,7 +45,7 @@ python_script = PYTHONPATH=$(PWD) \
 
 .PHONY: format
 format:
-	black gazettes/* scripts/* tests/*
+	black gazettes/* scripts/* tests/* *.py
 
 .PHONY: tests
 tests: format
