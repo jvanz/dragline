@@ -8,16 +8,22 @@ from transformers import (
     EncoderDecoderModel,
     TrainingArguments,
     Trainer,
+    EarlyStoppingCallback,
 )
 from datasets import load_dataset, load_metric
 import torch
 from torch.utils.data import DataLoader
+import numpy as np
 
 # checkpoint = "google/bert_for_seq_generation_L-24_bbc_encoder"
 checkpoint = "bert-base-uncased"
-batch_size = 1000
-dataset_size = 1000
-max_steps = dataset_size / batch_size
+train_dataset_size = 100000
+eval_dataset_size = 1000
+MAX_SEQUENCE_LENGTH = 20
+BATCH_SIZE = 32
+EPOCHS = 1000
+EARLY_STOPPING_PATIENCE = 500
+EARLY_STOPPING_THRESHOLD = 0.01
 
 model = EncoderDecoderModel.from_encoder_decoder_pretrained(checkpoint, checkpoint)
 tokenizer = BertTokenizer.from_pretrained(checkpoint)
@@ -27,12 +33,19 @@ model.config.vocab_size = model.config.decoder.vocab_size
 
 dataset = load_dataset("bookcorpus", streaming=False)
 print(dataset)
-small_train_dataset = dataset["train"].shuffle(seed=42).select(range(dataset_size))
-small_eval_dataset = dataset["train"].shuffle(seed=42).select(range(dataset_size))
+small_train_dataset = (
+    dataset["train"].shuffle(seed=42).select(range(train_dataset_size))
+)
+small_eval_dataset = dataset["train"].shuffle(seed=42).select(range(eval_dataset_size))
 
 
 def tokenize_function(examples):
-    return tokenizer(examples["text"], padding="max_length", truncation=True)
+    return tokenizer(
+        examples["text"],
+        padding="max_length",
+        truncation=True,
+        max_length=MAX_SEQUENCE_LENGTH,
+    )
 
 
 def add_input_ids_and_labels(examples):
@@ -62,28 +75,51 @@ small_eval_dataset = small_eval_dataset.remove_columns("text")
 small_eval_dataset = small_eval_dataset.with_format("torch")
 
 print("Dataset ready.")
-
-
 print(small_train_dataset)
 print(small_eval_dataset)
 
-
-training_args = TrainingArguments(output_dir="test_trainer")
-metric = load_metric("accuracy")
+training_args = TrainingArguments(
+    output_dir="test_trainer",
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=32,
+    evaluation_strategy="steps",
+    eval_accumulation_steps=1,
+    save_strategy="steps",
+    eval_steps=500,
+    num_train_epochs=EPOCHS,
+    log_level="debug",
+    metric_for_best_model="eval_loss",
+    load_best_model_at_end=True,
+    greater_is_better=False,
+)
+metric = load_metric("mse", "multilist")
 
 
 def compute_metric(eval_pred):
     logits, labels = eval_pred
+    logits = logits[0]
+
     predictions = np.argmax(logits, axis=-1)
     return metric.compute(predictions=predictions, references=labels)
+    # import pdb
+    # pdb.set_trace()
+    # metric_value = metric.compute(predictions=predictions, references=labels)
+    # metric_value["eval_loss"] = metric_value["mse"]
+    # return metric_value
 
+
+early_stop_callback = EarlyStoppingCallback(
+    early_stopping_patience=EARLY_STOPPING_PATIENCE,
+    early_stopping_threshold=EARLY_STOPPING_THRESHOLD,
+)
 
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=small_train_dataset,
     eval_dataset=small_eval_dataset,
-    compute_metrics=compute_metric,
+    # compute_metrics=compute_metric,
+    callbacks=[early_stop_callback],
 )
 print(trainer.get_train_dataloader())
 
