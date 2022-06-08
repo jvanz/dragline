@@ -24,6 +24,8 @@ BATCH_SIZE = 32
 EPOCHS = 1000
 EARLY_STOPPING_PATIENCE = 500
 EARLY_STOPPING_THRESHOLD = 0.01
+OUTPUT_DIR = "/data/test_trainer"
+RESUME_TRAIN = True
 
 model = EncoderDecoderModel.from_encoder_decoder_pretrained(checkpoint, checkpoint)
 tokenizer = BertTokenizer.from_pretrained(checkpoint)
@@ -79,7 +81,7 @@ print(small_train_dataset)
 print(small_eval_dataset)
 
 training_args = TrainingArguments(
-    output_dir="test_trainer",
+    output_dir=OUTPUT_DIR,
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=32,
     evaluation_strategy="steps",
@@ -91,21 +93,22 @@ training_args = TrainingArguments(
     metric_for_best_model="eval_loss",
     load_best_model_at_end=True,
     greater_is_better=False,
+    save_total_limit=5,
 )
-metric = load_metric("mse", "multilist")
+# metric = load_metric("mse", "multilist")
 
 
-def compute_metric(eval_pred):
-    logits, labels = eval_pred
-    logits = logits[0]
-
-    predictions = np.argmax(logits, axis=-1)
-    return metric.compute(predictions=predictions, references=labels)
-    # import pdb
-    # pdb.set_trace()
-    # metric_value = metric.compute(predictions=predictions, references=labels)
-    # metric_value["eval_loss"] = metric_value["mse"]
-    # return metric_value
+# def compute_metric(eval_pred):
+#     logits, labels = eval_pred
+#     logits = logits[0]
+#
+#     predictions = np.argmax(logits, axis=-1)
+#     return metric.compute(predictions=predictions, references=labels)
+#     # import pdb
+#     # pdb.set_trace()
+#     # metric_value = metric.compute(predictions=predictions, references=labels)
+#     # metric_value["eval_loss"] = metric_value["mse"]
+#     # return metric_value
 
 
 early_stop_callback = EarlyStoppingCallback(
@@ -123,4 +126,4 @@ trainer = Trainer(
 )
 print(trainer.get_train_dataloader())
 
-trainer.train()
+trainer.train(resume_from_checkpoint=RESUME_TRAIN)
