@@ -15,7 +15,8 @@ import torch
 from torch.utils.data import DataLoader
 import numpy as np
 
-checkpoint = "bert-base-uncased"
+# checkpoint = "bert-base-uncased"
+checkpoint = "pierreguillou/bert-base-cased-pt-lenerbr"
 train_dataset_size = 100000
 eval_dataset_size = 1000
 MAX_SEQUENCE_LENGTH = 20
@@ -23,9 +24,12 @@ BATCH_SIZE = 32
 EPOCHS = 1000
 EARLY_STOPPING_PATIENCE = 500
 EARLY_STOPPING_THRESHOLD = 0.01
-OUTPUT_DIR = "/data/test_trainer"
-RESUME_TRAIN = True
+OUTPUT_DIR = "data/lenerbr-generation"
+RESUME_TRAIN = False
 PARTIAL_DATASET = 0.1
+EVAL_STEPS = 5000
+
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 model = EncoderDecoderModel.from_encoder_decoder_pretrained(checkpoint, checkpoint)
 tokenizer = BertTokenizer.from_pretrained(checkpoint)
@@ -33,13 +37,16 @@ model.config.decoder_start_token_id = tokenizer.cls_token_id
 model.config.pad_token_id = tokenizer.pad_token_id
 model.config.vocab_size = model.config.decoder.vocab_size
 
-dataset = load_dataset("bookcorpus", streaming=False, split="train")
+# dataset = load_dataset("bookcorpus", streaming=False, split="train")
+dataset = load_dataset(
+    "pierreguillou/lener_br_finetuning_language_model", streaming=False
+)
 print(dataset)
 
-dataset_size = int(dataset.num_rows * PARTIAL_DATASET)
-dataset = dataset.shuffle().select(range(dataset_size))
-dataset = dataset.train_test_split(shuffle=True)
-print(dataset)
+# dataset_size = int(dataset.num_rows * PARTIAL_DATASET)
+# dataset = dataset.shuffle().select(range(dataset_size))
+# dataset = dataset.train_test_split(shuffle=True)
+# print(dataset)
 
 
 def tokenize_function(examples):
@@ -60,16 +67,18 @@ dataset = dataset.map(add_input_ids_and_labels, batched=True, num_proc=os.cpu_co
 dataset = dataset.remove_columns("text")
 dataset = dataset.with_format("torch")
 
+print(dataset)
 print("Dataset ready.")
 
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     per_device_train_batch_size=BATCH_SIZE,
-    per_device_eval_batch_size=32,
+    per_device_eval_batch_size=BATCH_SIZE,
     evaluation_strategy="steps",
     eval_accumulation_steps=1,
     save_strategy="steps",
-    eval_steps=5000,
+    eval_steps=EVAL_STEPS,
+    save_steps=EVAL_STEPS,
     num_train_epochs=EPOCHS,
     log_level="debug",
     metric_for_best_model="eval_loss",
@@ -87,7 +96,7 @@ trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=dataset["train"],
-    eval_dataset=dataset["test"],
+    eval_dataset=dataset["validation"],
     # compute_metrics=compute_metric,
     callbacks=[early_stop_callback],
 )
