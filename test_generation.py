@@ -9,22 +9,11 @@ from transformers import (
 )
 from datasets import load_dataset
 
-# checkpoint = "bert-base-uncased"
-checkpoint = "data/lenerbr-generation/checkpoint-8000/"
-train_dataset_size = 100000
-eval_dataset_size = 1000
+checkpoint = "neuralmind/bert-base-portuguese-cased"
+#checkpoint = "data/lenerbr-generation/checkpoint-8000/"
 MAX_SEQUENCE_LENGTH = 20
-BATCH_SIZE = 128
-EPOCHS = 1000
-EARLY_STOPPING_PATIENCE = 500
-EARLY_STOPPING_THRESHOLD = 0.01
-OUTPUT_DIR = "data/lenerbr-generation"
-RESUME_TRAIN = False
-PARTIAL_DATASET = 0.1
-EVAL_STEPS = 2000
 
 
-# model = EncoderDecoderModel.from_encoder_decoder_pretrained(checkpoint, checkpoint)
 model = EncoderDecoderModel.from_pretrained(checkpoint)
 tokenizer = BertTokenizer.from_pretrained("pierreguillou/bert-base-cased-pt-lenerbr")
 model.config.decoder_start_token_id = tokenizer.cls_token_id
