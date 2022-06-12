@@ -20,14 +20,14 @@ checkpoint = "pierreguillou/bert-base-cased-pt-lenerbr"
 train_dataset_size = 100000
 eval_dataset_size = 1000
 MAX_SEQUENCE_LENGTH = 20
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 EPOCHS = 1000
 EARLY_STOPPING_PATIENCE = 500
 EARLY_STOPPING_THRESHOLD = 0.01
 OUTPUT_DIR = "data/lenerbr-generation"
 RESUME_TRAIN = False
 PARTIAL_DATASET = 0.1
-EVAL_STEPS = 5000
+EVAL_STEPS = 2000
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -37,16 +37,10 @@ model.config.decoder_start_token_id = tokenizer.cls_token_id
 model.config.pad_token_id = tokenizer.pad_token_id
 model.config.vocab_size = model.config.decoder.vocab_size
 
-# dataset = load_dataset("bookcorpus", streaming=False, split="train")
 dataset = load_dataset(
     "pierreguillou/lener_br_finetuning_language_model", streaming=False
 )
 print(dataset)
-
-# dataset_size = int(dataset.num_rows * PARTIAL_DATASET)
-# dataset = dataset.shuffle().select(range(dataset_size))
-# dataset = dataset.train_test_split(shuffle=True)
-# print(dataset)
 
 
 def tokenize_function(examples):
@@ -97,7 +91,6 @@ trainer = Trainer(
     args=training_args,
     train_dataset=dataset["train"],
     eval_dataset=dataset["validation"],
-    # compute_metrics=compute_metric,
     callbacks=[early_stop_callback],
 )
 print(trainer.get_train_dataloader())

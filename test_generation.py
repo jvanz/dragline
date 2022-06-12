@@ -1,36 +1,83 @@
+import os
+
 from transformers import (
-    EncoderDecoderModel,
-    AutoTokenizer,
-    BertGenerationEncoder,
-    BertGenerationDecoder,
+    BertGenerationTokenizer,
     BertTokenizer,
+    BertGenerationDecoder,
+    BertGenerationConfig,
+    EncoderDecoderModel,
 )
 from datasets import load_dataset
 
-# dataset = load_dataset("pierreguillou/lener_br_finetuning_language_model")
+# checkpoint = "bert-base-uncased"
+checkpoint = "data/lenerbr-generation/checkpoint-8000/"
+train_dataset_size = 100000
+eval_dataset_size = 1000
+MAX_SEQUENCE_LENGTH = 20
+BATCH_SIZE = 128
+EPOCHS = 1000
+EARLY_STOPPING_PATIENCE = 500
+EARLY_STOPPING_THRESHOLD = 0.01
+OUTPUT_DIR = "data/lenerbr-generation"
+RESUME_TRAIN = False
+PARTIAL_DATASET = 0.1
+EVAL_STEPS = 2000
 
-# checkpoint = "bert-large-uncased"
-# checkpoint = "neuralmind/bert-base-portuguese-cased"
-checkpoint = "pierreguillou/bert-base-cased-pt-lenerbr"
-# sentence =     "This is a long article to summarize"
-sentence = "Isso é um longo artigo para ser sumarizado"
 
-encoder = BertGenerationEncoder.from_pretrained(
-    checkpoint  # , bos_token_id=101, eos_token_id=102
+# model = EncoderDecoderModel.from_encoder_decoder_pretrained(checkpoint, checkpoint)
+model = EncoderDecoderModel.from_pretrained(checkpoint)
+tokenizer = BertTokenizer.from_pretrained("pierreguillou/bert-base-cased-pt-lenerbr")
+model.config.decoder_start_token_id = tokenizer.cls_token_id
+model.config.pad_token_id = tokenizer.pad_token_id
+model.config.vocab_size = model.config.decoder.vocab_size
+
+frase_test = (
+    "Essa é a primeira frase que vou tentar gerar utilizando o meu modelo treinado."
 )
-# add cross attention layers and use BERT's cls token as BOS token and sep token as EOS token
-decoder = BertGenerationDecoder.from_pretrained(
-    checkpoint,
-    add_cross_attention=True,
-    is_decoder=True,
-    bos_token_id=101,
-    eos_token_id=102,
+input_ids = tokenizer(
+    frase_test, add_special_tokens=False, return_tensors="pt"
+).input_ids
+print(input_ids)
+outputs = model.generate(input_ids)
+print(outputs)
+for sequence in outputs:
+    frase_gerada = tokenizer.decode(sequence)
+    print(f"Frase original: {frase_test}. Frase gerada: {frase_gerada}")
+
+
+dataset = load_dataset(
+    "pierreguillou/lener_br_finetuning_language_model", streaming=False
 )
-bert2bert = EncoderDecoderModel(encoder=encoder, decoder=decoder)
+print(dataset)
 
-# create tokenizer...
-tokenizer = BertTokenizer.from_pretrained(checkpoint)
-input_ids = tokenizer(sentence, add_special_tokens=False, return_tensors="pt").input_ids
 
-outputs = bert2bert.generate(input_ids)
-print(tokenizer.decode(outputs[0]))
+def tokenize_function(examples):
+    return tokenizer(
+        examples["text"],
+        padding="max_length",
+        truncation=True,
+        max_length=MAX_SEQUENCE_LENGTH,
+    )
+
+
+def add_input_ids_and_labels(examples):
+    return {"input_ids": examples["input_ids"], "labels": examples["input_ids"]}
+
+
+dataset = dataset.map(tokenize_function, batched=True, num_proc=os.cpu_count())
+dataset = dataset.map(add_input_ids_and_labels, batched=True, num_proc=os.cpu_count())
+
+dataset = dataset["validation"].shuffle().select(range(50))
+dataset = dataset.with_format("pt")
+print(dataset)
+print(dataset["input_ids"])
+outputs = model.generate(dataset["input_ids"])
+print(outputs)
+originais = tokenizer.batch_decode(dataset["input_ids"])
+print(originais)
+sentences = tokenizer.batch_decode(outputs)
+print(sentences)
+
+print("-------------------------------------------")
+for original, generated in zip(originais, sentences):
+    print(f"{original} ---> {generated}")
