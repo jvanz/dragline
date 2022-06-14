@@ -55,10 +55,18 @@ def parse_command_line_arguments():
         help="Path to dataset directory with the data to predict",
     )
     parser.add_argument(
-        "--batch-size", required=False, type=int, default=32, help="",
+        "--batch-size",
+        required=False,
+        type=int,
+        default=32,
+        help="",
     )
     parser.add_argument(
-        "--parallel-calls", required=False, type=int, default=tf.data.AUTOTUNE, help="",
+        "--parallel-calls",
+        required=False,
+        type=int,
+        default=tf.data.AUTOTUNE,
+        help="",
     )
     parser.add_argument("--vocab-size", required=True, type=int)
     args = parser.parse_args()
@@ -123,7 +131,11 @@ def load_embedded_dataset(
                     shape=(max_text_length, embeddings_dimensions), dtype=tf.float32
                 )
             ),
-            args=(data_dir, max_text_length, batch_size,),
+            args=(
+                data_dir,
+                max_text_length,
+                batch_size,
+            ),
         )
         .batch(batch_size)
         .map(add_target, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False)

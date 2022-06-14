@@ -1,4 +1,5 @@
 import csv
+import shutil
 import os
 import string
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
@@ -6,17 +7,33 @@ from concurrent.futures import as_completed
 import json
 import re
 
-import transformers
 from datasets import load_dataset
 import tensorflow as tf
+import numpy as np
 
+from gazettes.data import get_dataset_stats, START_TOKEN, STOP_TOKEN
+
+from gazettes.data import (
+    TextAutoencoderWikipediaCSVDataset,
+    START_TOKEN,
+    STOP_TOKEN,
+    build_and_save_vocabulary,
+)
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 1000))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 5000))
 MAX_WORKERS = 10
-MINIMUM_SENTENCE_WORD_COUNT = 3
+MINIMUM_SENTENCE_WORD_COUNT = 4
+save_csv = True
+save_raw_dataset = True
+should_fit_tokenizer = True
+fit_tokenizer = False
+build_vocabulary = True
 
 VALID_SENTENCE_REGEX = r"^[\s\w,]+$"
+
+
+tokenizer = tf.keras.preprocessing.text.Tokenizer()
 
 
 def has_no_minimum_words_count(
@@ -73,10 +90,13 @@ def bytes_feature(value):
 
 def serialize_sample(text):
     text_feature = bytes_feature(text)
-    feature = {"text": text_feature}
-    return tf.train.Example(
+    feature = {
+        "text": text_feature,
+    }
+    example = tf.train.Example(
         features=tf.train.Features(feature=feature)
     ).SerializeToString()
+    return example
 
 
 def get_wikipedia_dataset(
@@ -88,21 +108,29 @@ def get_wikipedia_dataset(
         date=dataset_date,
         beam_runner="DirectRunner",
     )
-    datasets["train"].to_csv(
-        f"{DATA_DIR}/wikipedia/all.csv",
-        num_proc=MAX_WORKERS,
-        quoting=csv.QUOTE_ALL,
-        index=False,
-    )
+    if save_csv:
+        print("Saving all raw sentences")
+        datasets["train"].to_csv(
+            f"{DATA_DIR}/wikipedia/all.csv",
+            num_proc=MAX_WORKERS,
+            quoting=csv.QUOTE_ALL,
+            index=False,
+        )
+    print("Sentence segmentation...")
     datasets = datasets.map(
-        sentence_segmentation, batched=True, remove_columns="title", num_proc=6
+        sentence_segmentation,
+        batched=True,
+        num_proc=6,
+        remove_columns=["title", "url", "id"],
     )
-    datasets["train"].to_csv(
-        f"{DATA_DIR}/wikipedia/all_sentences.csv",
-        num_proc=MAX_WORKERS,
-        quoting=csv.QUOTE_ALL,
-        index=False,
-    )
+    if save_csv:
+        print("Saving all selected sentences.")
+        datasets["train"].to_csv(
+            f"{DATA_DIR}/wikipedia/all_sentences.csv",
+            num_proc=MAX_WORKERS,
+            quoting=csv.QUOTE_ALL,
+            index=False,
+        )
     datasets = datasets["train"].train_test_split(shuffle=True, keep_in_memory=False)
     dataset_eval_test = datasets["test"].train_test_split(
         test_size=0.5, shuffle=False, keep_in_memory=False
@@ -112,15 +140,25 @@ def get_wikipedia_dataset(
     return datasets
 
 
+def return_all_samples(datasets):
+    for dataset_split_name in datasets:
+        for sample in datasets[dataset_split_name]:
+            yield sample["text"].split(" ")
+
+
 def load_datasets():
+    print("Loading datasets...")
     dataset_name = "wikipedia"
     dataset_language = "pt"
     dataset_date = "20220220"
     datasets = get_wikipedia_dataset(dataset_name, dataset_language, dataset_date)
+    print("Calculating stats...")
+    data_stats = get_dataset_stats(return_all_samples(datasets))
     metadata = {
         "name": dataset_name,
         "language": dataset_language,
         "date": dataset_date,
+        "statistics": data_stats,
     }
     for dataset_split_name in datasets:
         metadata[dataset_split_name] = {"length": len(datasets[dataset_split_name])}
@@ -137,52 +175,63 @@ def write_wikipedia_file(datasets):
         )
 
 
-def load_tf_dataset(dataset):
+def load_tf_dataset(dataset, tokenize=False):
     def dataset_generator():
         for batch in dataset.to_dict(batched=True):
             for sample in batch["text"]:
-                yield (bytes(sample, "utf8"),)
+                yield bytes(sample, "utf8"),
 
+    signature = (tf.TensorSpec(shape=(None), dtype=tf.string),)
     return tf.data.Dataset.from_generator(
-        dataset_generator, output_signature=(tf.TensorSpec(shape=(), dtype=tf.string),),
+        dataset_generator,
+        output_signature=signature,
     )
 
 
 def write_tfrecord_file(filepath, batch):
     print(f"Writing {filepath}")
     with tf.io.TFRecordWriter(filepath) as file_writer:
-        for sample in batch[0]:
-            file_writer.write(serialize_sample(sample.numpy()))
+        for sample in batch[0].numpy():
+            file_writer.write(serialize_sample(sample))
 
 
 def write_tfrecord_files(datasets):
     results = []
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        for dataset_split_name in datasets:
-            sentences_dataset = load_tf_dataset(datasets[dataset_split_name])
-            counter = 0
-            for batch in sentences_dataset.batch(BATCH_SIZE):
-                results.append(
-                    executor.submit(
-                        write_tfrecord_file,
-                        filepath=f"{DATA_DIR}/wikipedia/{dataset_split_name}/{counter}.tfrecords",
-                        batch=batch,
-                    )
-                )
-                counter += 1
+    for dataset_split_name in datasets:
+        sentences_dataset = load_tf_dataset(datasets[dataset_split_name])
+        counter = 0
+        for batch in sentences_dataset.batch(BATCH_SIZE):
+            write_tfrecord_file(
+                filepath=f"{DATA_DIR}/wikipedia/{dataset_split_name}/{counter}.tfrecords",
+                batch=batch,
+            )
+            counter += 1
 
-    total_files_written = 0
-    futures_completed = 0
-    for result in as_completed(results):
-        futures_completed += 1
-        try:
-            result_returned = result.result()
-            total_files_written += 1
-        except Exception as e:
-            print(e)
 
-    print(f"Futures completed: {futures_completed}")
-    print(f"Total files written: {total_files_written}")
+def fit_tokenizer(datasets):
+    print("Fitting tokenizer")
+
+    def text_gen():
+        dataset = datasets["train"]
+        for batch in dataset.to_dict(batched=True):
+            for sample in batch["text"]:
+                yield f"{START_TOKEN} {sample} {STOP_TOKEN}"
+
+    tokenizer.fit_on_texts(text_gen())
+    with open(f"{DATA_DIR}/wikipedia/tokenizer.json", "w") as tokenizerfile:
+        tokenizerfile.write(tokenizer.to_json())
+    return tokenizer
+
+
+def build_vocabulary_file():
+    print("Building vocabulary file...")
+    train_dataset = TextAutoencoderWikipediaCSVDataset(
+        f"{DATA_DIR}/wikipedia/train.csv",
+        start_token=START_TOKEN,
+        stop_token=STOP_TOKEN,
+    ).map(lambda x, y: y)
+    print(list(train_dataset.take(1)))
+    build_and_save_vocabulary(train_dataset, f"{DATA_DIR}/wikipedia/vocabulary")
 
 
 def main():
@@ -195,9 +244,14 @@ def main():
     os.makedirs(f"{DATA_DIR}/wikipedia/evaluation", exist_ok=True)
 
     datasets, metadata = load_datasets()
-    write_wikipedia_file(datasets)
-    write_tfrecord_files(datasets)
-
+    if save_csv:
+        write_wikipedia_file(datasets)
+    if build_vocabulary:
+        build_vocabulary_file()
+    if should_fit_tokenizer:
+        tokenizer = fit_tokenizer(datasets)
+    if False and save_raw_dataset:
+        write_tfrecord_files(datasets)
     with open(f"{DATA_DIR}/wikipedia/metadata.json", "w") as metadatafile:
         json.dump(metadata, metadatafile)
 
