@@ -92,7 +92,9 @@ def extract_file_info(gazette):
         gazette["file_path"]
     )
     extract_file_text(
-        gazette["file_path"], metadata["Content-Type"], text_extracted_file_destination,
+        gazette["file_path"],
+        metadata["Content-Type"],
+        text_extracted_file_destination,
     )
 
 

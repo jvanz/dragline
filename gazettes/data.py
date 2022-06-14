@@ -1,203 +1,295 @@
 import json
 import re
 import os
+import sys
 import csv
 from urllib.parse import urlparse
 import logging
+import string
 
 from bs4 import BeautifulSoup
-from transformers import AutoTokenizer
-
+import numpy as np
 import tensorflow as tf
+from gensim.models import KeyedVectors
+
+PRETRAINED_UNK_EMBEDDING_TOKEN = "<unk>"
+UNK_TOKEN = "[UNK]"
+START_TOKEN = "STX"
+STOP_TOKEN = "ETX"
+PADDING_TOKEN = ""
 
 
-def decode_fn(encoded_example):
-    return tf.io.parse_example(
-        encoded_example,
-        {"text": tf.io.FixedLenFeature([], dtype=tf.string, default_value="")},
-    )["text"]
+def get_dataset_stats(dataset):
+    logging.debug("Generating dataset stats")
+    max_sequence_length = 0
+    min_sequence_length = sys.maxsize
+    total_number_tokens = 0
+    total_sample_count = 0
+    for sample in dataset:
+        total_number_tokens += len(sample)
+        total_sample_count += 1
+        max_sequence_length = max(max_sequence_length, len(sample))
+        min_sequence_length = min(min_sequence_length, len(sample))
+    return {
+        "max_sequence_length": max_sequence_length,
+        "min_sequence_length": min_sequence_length,
+        "average_sequence_length": round(total_number_tokens / total_sample_count),
+    }
 
 
-def get_cache_dir(fallback_dir: str = "", cache_subdirectory: str = ""):
-    if not cache_subdirectory:
-        raise "Missing cache subdirectory"
-    cache_dir = None
-    if fallback_dir:
-        cache_dir = os.environ.get(
-            "CACHE_DIR", f"{fallback_dir}/cache/{cache_subdirectory}"
-        )
-    else:
-        cache_dir = os.environ["CACHE_DIR"]
-        cache_dir = f"{cache_dir}/{cache_subdirectory}"
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
+def load_vocabulary_from_tokenizer(tokenizer_config_file: str, vocabulary_size: int):
+    with open(tokenizer_config_file, "r") as config_file:
+        config = json.load(config_file)
+        vocabulary = list(json.loads(config["config"]["word_counts"]).items())
+        vocabulary.sort(key=lambda i: i[1], reverse=True)
+        vocabulary = list(map(lambda i: i[0], vocabulary))
+        vocabulary = vocabulary[:vocabulary_size]
+        # add padding and OOV token
+        vocabulary.insert(0, UNK_TOKEN)
+        vocabulary.insert(0, PADDING_TOKEN)
+        return vocabulary
+
+
+def build_vocabulary(dataset):
+    text_vectorization = tf.keras.layers.TextVectorization()
+    text_vectorization.adapt(dataset)
+    return text_vectorization.get_vocabulary(include_special_tokens=False)
+
+
+def build_and_save_vocabulary(dataset, filepath):
+    with open(filepath, "w") as vocab_file:
+        for token in build_vocabulary(dataset):
+            vocab_file.write(token)
+            vocab_file.write("\n")
+        vocab_file.flush()
+
+
+def load_vocabulary_from_file(filepath, vocabulary_size: int = None):
+    vocabulary = []
+    with open(filepath, "r") as vocab_file:
+        for token in vocab_file:
+            vocabulary.append(token.strip())
+    if vocabulary_size is not None and vocabulary_size > 0:
+        vocabulary = vocabulary[:vocabulary_size]
+    return vocabulary
+
+
+def load_pretrained_embeddings(embeddings_file: str):
+    return KeyedVectors.load_word2vec_format(embeddings_file)
+
+
+def load_tokenizer(tokenizer_config_file: str):
+    with open(tokenizer_config_file, "r") as config_file:
+        config = json.load(config_file)
+        tokenizer = tf.keras.preprocessing.text.tokenizer_from_json(json.dumps(config))
+        return tokenizer
+
+
+def prepare_embedding_matrix(
+    tokenizador_config_file: str, embeddings_file: str, vocabulary_size: int
+):
+    tokenizer = load_tokenizer(tokenizador_config_file)
+    embeddings = load_pretrained_embeddings(embeddings_file)
+    # We have the OOV token and padding token. Thus, increase 2 in the vocab size
+    embedding_matrix = np.zeros((vocabulary_size + 2, embeddings.vector_size))
+    embedding_matrix[1] = embeddings.get_vector(PRETRAINED_UNK_EMBEDDING_TOKEN)
+
+    vocabulary = list(tokenizer.word_counts.items())
+    vocabulary.sort(key=lambda i: i[1], reverse=True)
+    vocabulary = list(map(lambda i: i[0], vocabulary))
+    vocabulary = vocabulary[:vocabulary_size]
+
+    for index, word in enumerate(vocabulary, start=2):
+        if embeddings.has_index_for(word):
+            embedding = embeddings.get_vector(word)
+            embedding_matrix[index] = embedding
+
+    return embedding_matrix
+
+
+def load_csv_file_column(csvfile_name: str, column: str):
+    if type(csvfile_name) is not str:
+        csvfile_name = str(csvfile_name, "utf8")
+    if type(column) is not str:
+        column = str(column, "utf8")
+    translate_table = str.maketrans("", "", string.punctuation)
+    with open(csvfile_name) as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            if len(row[column].translate(translate_table).strip()) == 0:
+                continue
+            yield row[column].strip()
 
 
 class WikipediaDataset(tf.data.Dataset):
-    def __new__(cls, data_dir: str, parallel_file_read=4, batch_size=32):
+    def __new__(cls, data_dir: str, batch_size: int = 32):
         datafiles = os.listdir(data_dir)
         datafiles = list(filter(lambda x: x.endswith("tfrecords"), datafiles))
         datafiles = [f"{data_dir}/{datafile}" for datafile in datafiles]
-        dataset = tf.data.Dataset.from_tensor_slices(datafiles)
-        dataset = dataset.interleave(
-            lambda datafile: tf.data.TFRecordDataset(datafile),
-            cycle_length=tf.data.AUTOTUNE,
+        datafilesdataset = tf.data.Dataset.from_tensor_slices(datafiles)
+        NUM_SHARDS = 6
+
+        @tf.function()
+        def parse_samples(batched_samples):
+            return tf.io.parse_example(
+                batched_samples,
+                {
+                    "text": tf.io.FixedLenFeature(
+                        [], dtype=tf.string, default_value=""
+                    ),
+                },
+            )["text"]
+
+        def make_dataset(shard_index):
+            filenames = datafilesdataset.shard(NUM_SHARDS, shard_index)
+            return (
+                tf.data.TFRecordDataset(filenames)
+                .batch(batch_size)
+                .map(
+                    parse_samples,
+                    num_parallel_calls=tf.data.AUTOTUNE,
+                    deterministic=False,
+                )
+            )
+
+        indices = tf.data.Dataset.range(NUM_SHARDS)
+        dataset = indices.interleave(
+            make_dataset,
             num_parallel_calls=tf.data.AUTOTUNE,
             deterministic=False,
-        )
-        dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-        dataset = dataset.batch(batch_size).map(decode_fn)
-        if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, f"cache_load_data"))
+        ).prefetch(tf.data.AUTOTUNE)
         return dataset
+
+        # return (
+        #     tf.data.Dataset.from_generator(
+        #         load_csv_file_column,
+        #         args=(data_dir, "text"),
+        #         output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+        #     )
+        #     .batch(batch_size)
+        #     .prefetch(tf.data.AUTOTUNE)
+        # )
+
+
+class TextAutoencoderWikipediaCSVDataset(tf.data.Dataset):
+    def __new__(
+        cls,
+        csv_file_path: str,
+        start_token: str = None,
+        stop_token: str = None,
+        text_vectorization=None,
+        batch_size: int = 32,
+        num_parallel_calls: int = tf.data.AUTOTUNE,
+        deterministic: bool = False,
+        add_decoder_input: bool = False,
+        one_hot: bool = False,
+        vocabulary_size: int = 0,
+    ):
+        assert (
+            start_token is not None
+            and stop_token is not None
+            or start_token is None
+            and stop_token is None
+        )
+        if one_hot and vocabulary_size <= 0:
+            raise Exception("one_hot and vocabulary_size must be set")
+
+        dataset = tf.data.Dataset.from_generator(
+            load_csv_file_column,
+            args=(csv_file_path, "text"),
+            output_signature=(tf.TensorSpec(shape=(), dtype=tf.string)),
+        )
+
+        dataset = dataset.map(
+            lambda x: (x, x),
+            num_parallel_calls=num_parallel_calls,
+            deterministic=deterministic,
+        )
+
+        def add_start_stop_tokens(x, y):
+            return x, tf.strings.join([start_token, " ", y, " ", stop_token])
+
+        if start_token is not None and stop_token is not None:
+            dataset = dataset.map(
+                add_start_stop_tokens,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=deterministic,
+            )
+
+        if text_vectorization is not None:
+
+            def text_vectorization_function(x, y):
+                return text_vectorization(x), text_vectorization(y)
+
+            dataset = dataset.map(
+                text_vectorization_function,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=deterministic,
+            )
+            if one_hot:
+
+                def one_hot_function(x, y):
+                    return (
+                        tf.one_hot(x, vocabulary_size),
+                        tf.one_hot(y, vocabulary_size),
+                    )
+
+                dataset = dataset.map(
+                    one_hot_function,
+                    num_parallel_calls=num_parallel_calls,
+                    deterministic=deterministic,
+                )
+
+        if add_decoder_input:
+
+            def add_decoder_input(x, y):
+                return (x, y), y
+
+            dataset = dataset.map(
+                add_decoder_input,
+                num_parallel_calls=num_parallel_calls,
+                deterministic=deterministic,
+            )
+
+        return dataset.prefetch(tf.data.AUTOTUNE)
 
 
 class TextAutoencoderWikipediaDataset(tf.data.Dataset):
     def __new__(
         cls,
         data_dir: str,
-        parallel_file_read: int = 4,
+        vocabulary,
         batch_size: int = 32,
-        max_text_length: int = 64,
-        vocabulary: str = None,
-        vocabulary_size: int = 0,
-        num_parallel_calls: int = tf.data.AUTOTUNE,
+        max_text_length: int = 40,
     ):
         dataset = WikipediaDataset(data_dir, batch_size=batch_size)
-
         vectorize_layer = tf.keras.layers.TextVectorization(
+            max_tokens=len(vocabulary),
             output_mode="int",
             output_sequence_length=max_text_length,
-            name="vectorization_layer",
-            vocabulary=vocabulary,
-            max_tokens=vocabulary_size,
         )
+        vectorize_layer.set_vocabulary(vocabulary)
 
-        def preprocess_text(text):
-            vectorized_text = vectorize_layer(text)
-            vectorized_target = tf.one_hot(vectorize_layer(text), vocabulary_size)
-            return (vectorized_text, vectorized_target)
+        @tf.function
+        def vectorize_text(text):
+            target = vectorize_layer(text)
+            target = tf.ensure_shape(target, [batch_size, max_text_length])
+            target = tf.one_hot(target, len(vocabulary))
+            return text, target
+
+        @tf.function
+        def ensure_shape(text, target):
+            return text, tf.ensure_shape(target, [batch_size, max_text_length])
+
+        @tf.function
+        def one_hot(text, target):
+            return text, tf.one_hot(target, len(vocabulary))
 
         dataset = dataset.map(
-            preprocess_text, num_parallel_calls=num_parallel_calls, deterministic=False,
+            vectorize_text, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False
         )
-        if has_cache_enable():
-            dataset.cache(
-                get_cache_dir(data_dir, f"cache_text_autoencoder_preprocessing"),
-            )
-
-        dataset.vectorize_layer = vectorize_layer
-        return dataset
-
-
-def load_bert_tokenizer(model_checkpoint: str, vocab_file: str):
-    return AutoTokenizer.from_pretrained(
-        model_checkpoint,
-        use_fast=False,
-        vocab_file=vocab_file,
-        clean_text=True,
-        do_lower_case=True,
-    )
-
-
-class TextBertAutoencoderWikipediaDataset(tf.data.Dataset):
-    def __new__(
-        cls,
-        data_dir: str,
-        parallel_file_read: int = 4,
-        batch_size: int = 1000,
-        max_text_length: int = 64,
-        vocabulary: str = None,
-        vocabulary_size: int = 0,
-        num_parallel_calls: int = tf.data.AUTOTUNE,
-        model_checkpoint: str = "neuralmind/bert-base-portuguese-cased",
-    ):
-        dataset = WikipediaDataset(data_dir)
-        tokenizer = load_bert_tokenizer(model_checkpoint, vocabulary)
-
-        def preprocess_text(text):
-            tokenizer_output = tokenizer(
-                text.numpy().decode("utf8"),
-                padding="max_length",
-                truncation=True,
-                max_length=max_text_length,
-            )
-            return (
-                tokenizer_output["input_ids"],
-                tokenizer_output["token_type_ids"],
-                tokenizer_output["attention_mask"],
-                tokenizer_output["input_ids"],
-            )
-
-        def tf_python_preprocess_text(text):
-            preprocessed_text = tf.py_function(
-                preprocess_text,
-                [text],
-                [
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="input_ids"
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="token_type_ids",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="target"
-                    ),
-                ],
-            )
-            return [
-                tf.reshape(tensor, [max_text_length,]) for tensor in preprocessed_text
-            ]
-
-        def tf_preprocess_text(batch):
-            return tf.map_fn(
-                fn=tf_python_preprocess_text,
-                elems=batch,
-                fn_output_signature=[
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="input_ids"
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="token_type_ids",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="attention_mask",
-                    ),
-                    tf.TensorSpec(
-                        shape=(max_text_length,), dtype=tf.int32, name="target"
-                    ),
-                ],
-            )
-
-        dataset = dataset.map(
-            tf_preprocess_text,
-            num_parallel_calls=num_parallel_calls,
-            deterministic=False,
-        )
-        if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, "transformer_preprocessing"),)
-
-        def organize_targets(input_ids, token_type_ids, attention_mask, target):
-            return (
-                (input_ids, token_type_ids, attention_mask),
-                target,
-                # tf.one_hot(target, vocabulary_size),
-            )
-
-        def onehot_target(inputs, target):
-            return (
-                inputs,
-                tf.one_hot(target, vocabulary_size),
-            )
-
-        dataset = dataset.map(organize_targets)
-        logging.info(dataset.element_spec)
-        dataset = dataset.map(onehot_target)
-        if has_cache_enable():
-            dataset.cache(get_cache_dir(data_dir, "transformer_one_hot_target"))
+        # .map(ensure_shape, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False)
+        # .map(one_hot, num_parallel_calls=tf.data.AUTOTUNE, deterministic=False)
         return dataset
 
 
