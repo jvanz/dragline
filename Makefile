@@ -148,3 +148,8 @@ download-word-embeddings:
 	mkdir -p $(DATA_DIR)/embeddings
 	curl -o $(DATA_DIR)/embeddings/glove_s50.zip http://143.107.183.175:22980/download.php?file=embeddings/glove/glove_s50.zip
 	unzip -d $(DATA_DIR)/embeddings $(DATA_DIR)/embeddings/glove_s50.zip
+
+.PHONY: download-querido-diario-files
+download-querido-diario-files:
+	mkdir -p $(DATA_DIR)/querido_diario
+	s3cmd get --verbose --continue --skip-existing s3://querido-diario/ $(DATA_DIR)/querido_diario --recursive
