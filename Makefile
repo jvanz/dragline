@@ -175,5 +175,5 @@ publish_gazettes_sentences:
 
 .PHONY: train-querido-diario-autoencoder
 train-querido-diario-autoencoder:
-	$(call python_script, scripts/querido_diario_transformer.py)
+	$(call python_script, scripts/querido_diario_autoencoder.py)
 
