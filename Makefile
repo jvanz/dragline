@@ -45,11 +45,18 @@ python_script = PYTHONPATH=$(PWD) \
 
 .PHONY: format
 format:
-	black gazettes/* scripts/* tests/* *.py
+	black gazettes/*.py scripts/*.py tests/*.py
 
 .PHONY: tests
 tests: format
 	python -m unittest -f tests/*.py
+
+.PHONY: tests-preprocessing
+tests-preprocessing: format
+	cp data/querido_diario/1302603/2022-06-15/054847a8785e44e832b796ef21f5cd4619d32173.txt ./tests/
+	cp data/querido_diario/2507507/2022-06-20/a8b95c77d984aa228dc8c9c6094b526857df6878.txt ./tests/
+	cp data/querido_diario/2507507/2022-06-10/c3789a9296485ff74a139114f5925e71c4f548d9.txt ./tests/
+	python -m unittest -f tests/preprocessing_tests.py
 
 .PHONY: update-conda-env
 update-conda-env:
@@ -152,4 +159,21 @@ download-word-embeddings:
 .PHONY: download-querido-diario-files
 download-querido-diario-files:
 	mkdir -p $(DATA_DIR)/querido_diario
-	s3cmd get --verbose --continue --skip-existing s3://querido-diario/ $(DATA_DIR)/querido_diario --recursive
+	s3cmd get --verbose --skip-existing s3://querido-diario/ $(DATA_DIR)/querido_diario --recursive
+
+.PHONY: preprocess_gazettes
+preprocess_gazettes:
+	$(call python_script, scripts/preprocess_querido_diario_files.py)
+
+.PHONY: preprocess_wikipedia
+preprocess_wikipedia:
+	$(call python_script, scripts/preprocess_wikipedia.py)
+
+.PHONY: publish_gazettes_sentences
+publish_gazettes_sentences:
+	$(call python_script, scripts/publish_querido_diario_dataset.py)
+
+.PHONY: train-querido-diario-autoencoder
+train-querido-diario-autoencoder:
+	$(call python_script, scripts/querido_diario_transformer.py)
+
