@@ -15,12 +15,6 @@ def read_files_and_publish():
 
     files = list(find_sentence_gazette_files("data/querido_diario/"))
     dataset = load_dataset("text", data_files=files)
-    dataset = dataset["train"].train_test_split(shuffle=True)
-    print(dataset)
-    test = dataset["test"]
-    test = test.train_test_split(test_size=0.5)
-    dataset["test"] = test["train"]
-    dataset["evaluation"] = test["test"]
     print(dataset)
     print("-" * 100)
 
@@ -82,6 +76,15 @@ def read_files_and_publish():
             "total_tokens_count",
         ]
     )
+
+    dataset = dataset["train"].train_test_split(shuffle=True)
+    test = dataset["test"]
+    test = test.train_test_split(test_size=0.5)
+    dataset["test"] = test["train"]
+    dataset["evaluation"] = test["test"]
+    print(dataset)
+    print("-" * 100)
+
     dataset.push_to_hub(DATASET_NAME)
 
 
