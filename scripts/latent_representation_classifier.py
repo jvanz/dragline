@@ -268,10 +268,6 @@ if __name__ == "__main__":
     print(f"Device in use: {device}")
     dataset = prepare_dataset()
 
-    dataset["train"] = dataset["train"].select(range(64 * 2))
-    dataset["test"] = dataset["test"].select(range(64 * 2))
-    dataset["evaluation"] = dataset["evaluation"].select(range(64 * 2))
-
     encoder = BertGenerationEncoder.from_pretrained(checkpoint)
     classifier = Classifier(encoder.config.hidden_size, 1)
     loss_fn = nn.BCELoss()
@@ -282,6 +278,7 @@ if __name__ == "__main__":
     classifier = load_best_checkpoint()
     eval_loss = evaluation(encoder, classifier, dataset, loss_fn)
     train_json["eval_loss"] = eval_loss.item()
+
     with open(
         f"{checkpoint_output_dir}/training_{train_json['start_train']}.json", "w"
     ) as training_json:
