@@ -1,5 +1,7 @@
 import os
 from pathlib import PurePosixPath
+from datetime import datetime
+import json
 
 import torch
 from torch import nn
@@ -138,22 +140,31 @@ def train(
     )
 
     min_test_error = None
+    training_log = {"start_train": datetime.now().timestamp(), "epochs": []}
+
     for epoch in range(epochs):
         print(f"Epoch {epoch}")
         print("-" * 50)
-        train_step(encoder, classifier, train_dataloader, loss_fn, optimizer)
-        test_error = eval_step(encoder, classifier, test_dataloader, loss_fn)
+        losses = train_step(encoder, classifier, train_dataloader, loss_fn, optimizer)
+        test_error = test_step(encoder, classifier, test_dataloader, loss_fn)
 
         if min_test_error is None or test_error < min_test_error:
             min_test_error = test_error
             torch.save(
                 classifier,
-                f"{checkpoint_output_dir}/latent_space_classifier_epoch_{epoch}_loss_{min_test_error}.pth",
+                f"{checkpoint_output_dir}/latent_space_classifier_timestamp_{training_log['start_train']}_epoch_{epoch}_loss_{min_test_error}.pth",
             )
+
+        epoch_log = {"epoch": epoch, "test_loss": test_error.item(), "losses": losses}
+        training_log["epochs"].append(epoch_log)
+
+    training_log["end_train"] = datetime.now().timestamp()
+    return training_log
 
 
 def train_step(encoder, classifier, data, loss_fn, optimizer):
     size = len(data.dataset)
+    losses = []
     for batch, X in enumerate(data):
         input_ids = X["input_ids"].to(device)
         attention_mask = X["attention_mask"].to(device)
@@ -170,12 +181,15 @@ def train_step(encoder, classifier, data, loss_fn, optimizer):
         loss.backward()
         optimizer.step()
 
-        if True or batch % 100 == 0:
-            loss, current = loss.item(), (batch + 1) * len(input_ids)
+        loss = loss.item()
+        losses.append({"batch": batch, "loss": loss})
+        if batch % 100 == 0:
+            current = (batch + 1) * len(input_ids)
             print(f"Loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+    return losses
 
 
-def eval_step(encoder, classifier, data, loss_fn):
+def test_step(encoder, classifier, data, loss_fn):
     size = len(data.dataset)
     num_batches = len(data)
     test_loss = 0.0
@@ -223,6 +237,7 @@ def evaluation(encoder, classifier, dataset, loss_fn, batch_size: int = 64):
     )
     eval_loss = calculate_avg_loss(encoder, classifier, evaluation_dataloader, loss_fn)
     print(f"Evaluation error:\n  Avg loss: {eval_loss:>8f}\n")
+    return eval_loss
 
 
 def extract_loss_value_from_checkpoint_filepath(checkpoint):
@@ -236,6 +251,8 @@ def load_best_checkpoint():
     min_loss = None
     min_loss_checkpoint = None
     for checkpoint in checkpoints:
+        if not checkpoint.endswith("pth"):
+            continue
         loss = extract_loss_value_from_checkpoint_filepath(checkpoint)
         if min_loss is None or loss < min_loss:
             min_loss = loss
@@ -260,7 +277,12 @@ if __name__ == "__main__":
     loss_fn = nn.BCELoss()
     optimizer = torch.optim.SGD(classifier.parameters(), lr=learning_rate)
 
-    train(encoder, classifier, dataset, loss_fn, optimizer, epochs=2)
+    train_json = train(encoder, classifier, dataset, loss_fn, optimizer, epochs=2)
 
     classifier = load_best_checkpoint()
-    evaluation(encoder, classifier, dataset, loss_fn)
+    eval_loss = evaluation(encoder, classifier, dataset, loss_fn)
+    train_json["eval_loss"] = eval_loss.item()
+    with open(
+        f"{checkpoint_output_dir}/training_{train_json['start_train']}.json", "w"
+    ) as training_json:
+        json.dump(train_json, training_json)
