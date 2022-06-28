@@ -10,6 +10,8 @@ checkpoint = "neuralmind/bert-base-portuguese-cased"
 MAX_SEQUENCE_LENGTH = 60
 checkpoint_output_dir = "checkpoints/latent_space_classifier"
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 class Classifier(nn.Module):
     """
@@ -123,12 +125,15 @@ def prepare_dataset(num_proc=10):
 def train_step(encoder, classifier, data, loss_fn, optimizer):
     size = len(data.dataset)
     for batch, X in enumerate(data):
+        input_ids = X["input_ids"].to(device)
+        attention_mask = X["attention_mask"].to(device)
         latent_space = encoder.forward(
-            input_ids=X["input_ids"], attention_mask=X["attention_mask"]
+            input_ids=input_ids, attention_mask=attention_mask
         )[0]
         latent_space = torch.sum(latent_space, dim=1)
         prediction = classifier.forward(latent_space.clone())
-        loss = loss_fn(prediction.flatten(), X["is_gazette"])
+        labels = X["is_gazette"].to(device)
+        loss = loss_fn(prediction.flatten(), labels)
 
         optimizer.zero_grad()
         loss.backward()
@@ -145,12 +150,15 @@ def eval_step(encoder, classifier, data, loss_fn):
     test_loss = 0.0
     with torch.no_grad():
         for X in data:
+            input_ids = X["input_ids"].to(device)
+            attention_mask = X["attention_mask"].to(device)
             latent_space = encoder.forward(
-                input_ids=X["input_ids"], attention_mask=X["attention_mask"]
+                input_ids=input_ids, attention_mask=attention_mask
             )[0]
             latent_space = torch.sum(latent_space, dim=1)
             prediction = classifier.forward(latent_space.clone())
-            test_loss += loss_fn(prediction.flatten(), X["is_gazette"])
+            labels = X["is_gazette"].to(device)
+            test_loss += loss_fn(prediction.flatten(), labels)
     test_loss /= num_batches
     print(f"Test error:\n  Avg loss: {test_loss:>8f}\n")
     return test_loss
@@ -160,7 +168,9 @@ def train(
     dataset, epochs: int = 100, batch_size: int = 64, learning_rate: float = 1e-3
 ):
     encoder = BertGenerationEncoder.from_pretrained(checkpoint)
+    encoder.to(device)
     classifier = Classifier(encoder.config.hidden_size, 1)
+    classifier.to(device)
     classifier.train()
 
     loss_fn = nn.BCELoss()
@@ -192,5 +202,6 @@ def train(
 if __name__ == "__main__":
     os.makedirs(checkpoint_output_dir, exist_ok=True)
     print(f"CUDA available? {torch.cuda.is_available()}")
+    print(f"Device in use: {device}")
     dataset = prepare_dataset()
     train(dataset)
