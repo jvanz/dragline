@@ -177,3 +177,7 @@ publish_gazettes_sentences:
 train-querido-diario-autoencoder:
 	$(call python_script, scripts/querido_diario_autoencoder.py)
 
+.PHONY: train-latent-representation-classifier
+train-latent-representation-classifier: format
+	$(call python_script, scripts/latent_representation_classifier.py)
+
