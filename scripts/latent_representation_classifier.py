@@ -1,4 +1,5 @@
 import os
+from pathlib import PurePosixPath
 
 import torch
 from torch import nn
@@ -11,6 +12,7 @@ MAX_SEQUENCE_LENGTH = 60
 checkpoint_output_dir = "checkpoints/latent_space_classifier"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+learning_rate = 1e-3
 
 
 class Classifier(nn.Module):
@@ -68,8 +70,6 @@ def prepare_dataset(num_proc=10):
         type="torch",
         columns=["input_ids", "token_type_ids", "attention_mask", "is_gazette"],
     )
-    print(dataset)
-    print(dataset["train"][:3])
 
     wikipedia = load_dataset("jvanz/portuguese_wikipedia_sentences")
     wikipedia = wikipedia.map(
@@ -89,8 +89,6 @@ def prepare_dataset(num_proc=10):
         type="torch",
         columns=["input_ids", "token_type_ids", "attention_mask", "is_gazette"],
     )
-    print(wikipedia)
-    print(wikipedia["train"][:3])
 
     train_dataset = interleave_datasets(
         [
@@ -115,66 +113,22 @@ def prepare_dataset(num_proc=10):
         type="torch",
         columns=["input_ids", "token_type_ids", "attention_mask", "is_gazette"],
     )
-    print(dataset)
-    print(dataset["train"][:3])
-    print("-" * 100)
 
     return dataset
 
 
-def train_step(encoder, classifier, data, loss_fn, optimizer):
-    size = len(data.dataset)
-    for batch, X in enumerate(data):
-        input_ids = X["input_ids"].to(device)
-        attention_mask = X["attention_mask"].to(device)
-        latent_space = encoder.forward(
-            input_ids=input_ids, attention_mask=attention_mask
-        )[0]
-        latent_space = torch.sum(latent_space, dim=1)
-        prediction = classifier.forward(latent_space.clone())
-        labels = X["is_gazette"].to(device)
-        loss = loss_fn(prediction.flatten(), labels)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        if batch % 100 == 0:
-            loss, current = loss.item(), batch * len(X)
-            print(f"Loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-
-
-def eval_step(encoder, classifier, data, loss_fn):
-    size = len(data.dataset)
-    num_batches = len(data)
-    test_loss = 0.0
-    with torch.no_grad():
-        for X in data:
-            input_ids = X["input_ids"].to(device)
-            attention_mask = X["attention_mask"].to(device)
-            latent_space = encoder.forward(
-                input_ids=input_ids, attention_mask=attention_mask
-            )[0]
-            latent_space = torch.sum(latent_space, dim=1)
-            prediction = classifier.forward(latent_space.clone())
-            labels = X["is_gazette"].to(device)
-            test_loss += loss_fn(prediction.flatten(), labels)
-    test_loss /= num_batches
-    print(f"Test error:\n  Avg loss: {test_loss:>8f}\n")
-    return test_loss
-
-
 def train(
-    dataset, epochs: int = 100, batch_size: int = 64, learning_rate: float = 1e-3
+    encoder,
+    classifier,
+    dataset,
+    loss_fn,
+    optimizer,
+    epochs: int = 100,
+    batch_size: int = 64,
 ):
-    encoder = BertGenerationEncoder.from_pretrained(checkpoint)
     encoder.to(device)
-    classifier = Classifier(encoder.config.hidden_size, 1)
     classifier.to(device)
     classifier.train()
-
-    loss_fn = nn.BCELoss()
-    optimizer = torch.optim.SGD(classifier.parameters(), lr=learning_rate)
 
     train_dataloader = torch.utils.data.DataLoader(
         dataset["train"], batch_size=batch_size
@@ -194,9 +148,101 @@ def train(
             min_test_error = test_error
             torch.save(
                 classifier,
-                f"{checkpoint_output_dir}/latent_space_classifier_{min_test_error}.pth",
+                f"{checkpoint_output_dir}/latent_space_classifier_epoch_{epoch}_loss_{min_test_error}.pth",
             )
-        return
+
+
+def train_step(encoder, classifier, data, loss_fn, optimizer):
+    size = len(data.dataset)
+    for batch, X in enumerate(data):
+        input_ids = X["input_ids"].to(device)
+        attention_mask = X["attention_mask"].to(device)
+        with torch.no_grad():
+            latent_space = encoder.forward(
+                input_ids=input_ids, attention_mask=attention_mask
+            )[0]
+        latent_space = torch.sum(latent_space, dim=1)
+        prediction = classifier.forward(latent_space.clone())
+        labels = X["is_gazette"].to(device)
+        loss = loss_fn(prediction.flatten(), labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if True or batch % 100 == 0:
+            loss, current = loss.item(), (batch + 1) * len(input_ids)
+            print(f"Loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
+
+
+def eval_step(encoder, classifier, data, loss_fn):
+    size = len(data.dataset)
+    num_batches = len(data)
+    test_loss = 0.0
+    with torch.no_grad():
+        for X in data:
+            input_ids = X["input_ids"].to(device)
+            attention_mask = X["attention_mask"].to(device)
+            with torch.no_grad():
+                latent_space = encoder.forward(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )[0]
+            latent_space = torch.sum(latent_space, dim=1)
+            prediction = classifier.forward(latent_space.clone())
+            labels = X["is_gazette"].to(device)
+            test_loss += loss_fn(prediction.flatten(), labels)
+    test_loss /= num_batches
+    print(f"Test error:\n  Avg loss: {test_loss:>8f}\n")
+    return test_loss
+
+
+def calculate_avg_loss(encoder, classifier, data, loss_fn):
+    size = len(data.dataset)
+    num_batches = len(data)
+    loss = 0.0
+    with torch.no_grad():
+        for X in data:
+            input_ids = X["input_ids"].to(device)
+            attention_mask = X["attention_mask"].to(device)
+            with torch.no_grad():
+                latent_space = encoder.forward(
+                    input_ids=input_ids, attention_mask=attention_mask
+                )[0]
+            latent_space = torch.sum(latent_space, dim=1)
+            prediction = classifier.forward(latent_space.clone())
+            labels = X["is_gazette"].to(device)
+            loss += loss_fn(prediction.flatten(), labels)
+    loss /= num_batches
+    return loss
+
+
+def evaluation(encoder, classifier, dataset, loss_fn, batch_size: int = 64):
+    classifier.eval()
+    evaluation_dataloader = torch.utils.data.DataLoader(
+        dataset["evaluation"], batch_size=batch_size
+    )
+    eval_loss = calculate_avg_loss(encoder, classifier, evaluation_dataloader, loss_fn)
+    print(f"Evaluation error:\n  Avg loss: {eval_loss:>8f}\n")
+
+
+def extract_loss_value_from_checkpoint_filepath(checkpoint):
+    path = PurePosixPath(checkpoint)
+    loss = path.name[: len(path.suffix) * -1].split("_")[-1]
+    return float(loss)
+
+
+def load_best_checkpoint():
+    checkpoints = os.listdir(checkpoint_output_dir)
+    min_loss = None
+    min_loss_checkpoint = None
+    for checkpoint in checkpoints:
+        loss = extract_loss_value_from_checkpoint_filepath(checkpoint)
+        if min_loss is None or loss < min_loss:
+            min_loss = loss
+            min_loss_checkpoint = checkpoint
+    min_loss_checkpoint = f"{checkpoint_output_dir}/{min_loss_checkpoint}"
+    print(f"Best checkpoint: {min_loss_checkpoint}")
+    return torch.load(min_loss_checkpoint)
 
 
 if __name__ == "__main__":
@@ -204,4 +250,17 @@ if __name__ == "__main__":
     print(f"CUDA available? {torch.cuda.is_available()}")
     print(f"Device in use: {device}")
     dataset = prepare_dataset()
-    train(dataset)
+
+    dataset["train"] = dataset["train"].select(range(64 * 2))
+    dataset["test"] = dataset["test"].select(range(64 * 2))
+    dataset["evaluation"] = dataset["evaluation"].select(range(64 * 2))
+
+    encoder = BertGenerationEncoder.from_pretrained(checkpoint)
+    classifier = Classifier(encoder.config.hidden_size, 1)
+    loss_fn = nn.BCELoss()
+    optimizer = torch.optim.SGD(classifier.parameters(), lr=learning_rate)
+
+    train(encoder, classifier, dataset, loss_fn, optimizer, epochs=2)
+
+    classifier = load_best_checkpoint()
+    evaluation(encoder, classifier, dataset, loss_fn)
