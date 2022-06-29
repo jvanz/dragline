@@ -273,7 +273,7 @@ if __name__ == "__main__":
     loss_fn = nn.BCELoss()
     optimizer = torch.optim.SGD(classifier.parameters(), lr=learning_rate)
 
-    train_json = train(encoder, classifier, dataset, loss_fn, optimizer, epochs=2)
+    train_json = train(encoder, classifier, dataset, loss_fn, optimizer)
 
     classifier = load_best_checkpoint()
     eval_loss = evaluation(encoder, classifier, dataset, loss_fn)
