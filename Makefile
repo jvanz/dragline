@@ -181,3 +181,11 @@ train-querido-diario-autoencoder:
 train-latent-representation-classifier: format
 	$(call python_script, scripts/latent_representation_classifier.py)
 
+.PHONY: train-latent-space-representation-edit-model
+train-latent-space-representation-edit-model: format
+	PYTHONPATH=$(PWD) python scripts/text_style_transfer.py \
+	  --name latent_space_representation_edit_model_wang_controllable_2019 \
+	  --checkpoint jvanz/querido_diario_autoencoder \
+	  #--debug
+
+
