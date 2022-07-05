@@ -152,19 +152,14 @@ def train(
     print("-" * 100)
     print(f"Starting training...")
     print(f"Device used: {device}")
-    train_dataloader = DataLoader(
-        datasets["train"], batch_size=batch_size, pin_memory=True
-    )
-    test_dataloader = DataLoader(
-        datasets["test"], batch_size=batch_size, pin_memory=True
-    )
-    evaluation_dataloader = DataLoader(
-        datasets["evaluation"], batch_size=batch_size, pin_memory=True
-    )
+    train_dataloader = DataLoader(datasets["train"], batch_size=batch_size)
+    test_dataloader = DataLoader(datasets["test"], batch_size=batch_size)
+    evaluation_dataloader = DataLoader(datasets["evaluation"], batch_size=batch_size)
 
     autoencoder_optimizer = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
     autoencoder.to(device)
 
+    classifier.to(device)
     classifier_loss_fn = nn.BCELoss()
     classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
 
@@ -222,15 +217,12 @@ def train_step(
     size = dataset.dataset.num_rows
     batch_size = dataset.batch_size
     for batch in dataset:
-        batch["input_ids"].to(device)
-        batch["attention_mask"].to(device)
-        batch["is_legal"].to(device)
 
         # train autoencoder
         autoencoder_output = autoencoder.forward(
-            input_ids=batch["input_ids"],
-            attention_mask=batch["attention_mask"],
-            labels=batch["input_ids"],
+            input_ids=batch["input_ids"].to(device),
+            attention_mask=batch["attention_mask"].to(device),
+            labels=batch["input_ids"].to(device),
         )
         autoencoder_optimizer.zero_grad()
         autoencoder_output.loss.backward()
@@ -246,7 +238,7 @@ def train_step(
         # train classifier
         classifier_output = classifier.forward(encoder_latent_space)
         classifier_loss = classifier_loss_fn(
-            classifier_output.flatten(), batch["is_legal"]
+            classifier_output.flatten(), batch["is_legal"].to(device)
         )
         classifier_optimizer.zero_grad()
         classifier_loss.backward()
@@ -277,23 +269,22 @@ def evaluation_step(
     with torch.no_grad():
         for batch in dataset:
             current += 1
-            batch["input_ids"].to(device)
-            batch["attention_mask"].to(device)
-            batch["is_legal"].to(device)
 
             # test autoencoder
             autoencoder_output = autoencoder.forward(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"],
-                labels=batch["input_ids"],
+                input_ids=batch["input_ids"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+                labels=batch["input_ids"].to(device),
             )
             autoencoder_loss += autoencoder_output.loss.item()
             encoder_latent_space = torch.sum(
                 autoencoder_output.encoder_last_hidden_state.detach(), dim=1
             )
 
-            input_sentence = batch["input_ids"][0]
-            output_sentence = autoencoder.generate(input_sentence.unsqueeze(0))[0]
+            input_sentence = batch["input_ids"][0].to(device)
+            output_sentence = autoencoder.generate(input_sentence.unsqueeze(0))[0].to(
+                device
+            )
             input_sentence = tokenizer.decode(
                 batch["input_ids"][0], skip_special_tokens=True
             )
@@ -307,7 +298,7 @@ def evaluation_step(
             # test classifier
             classifier_output = classifier.forward(encoder_latent_space)
             classifier_loss_value = classifier_loss_fn(
-                classifier_output.flatten(), batch["is_legal"]
+                classifier_output.flatten(), batch["is_legal"].to(device)
             )
             classifier_loss += classifier_loss_value.item()
 
@@ -380,7 +371,9 @@ def load_tokenizer(checkpoint):
 def create_models(checkpoint: str, classifier_labels: int, tokenizer: BertTokenizer):
     assert checkpoint != None and len(checkpoint) > 0
     assert classifier_labels > 0
-    autoencoder = EncoderDecoderModel.from_pretrained(checkpoint)
+    autoencoder = EncoderDecoderModel.from_encoder_decoder_pretrained(
+        checkpoint, checkpoint
+    )
     autoencoder.config.decoder_start_token_id = tokenizer.cls_token_id
     autoencoder.config.pad_token_id = tokenizer.cls_token_id
     classifier = Classifier(autoencoder.config.encoder.hidden_size, classifier_labels)

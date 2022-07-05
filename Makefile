@@ -185,7 +185,8 @@ train-latent-representation-classifier: format
 train-latent-space-representation-edit-model: format
 	PYTHONPATH=$(PWD) python scripts/text_style_transfer.py \
 	  --name latent_space_representation_edit_model_wang_controllable_2019 \
-	  --checkpoint jvanz/querido_diario_autoencoder \
+	  --checkpoint neuralmind/bert-base-portuguese-cased \
+	  --batch-size 32 \
 	  #--debug
 
 
