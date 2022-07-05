@@ -14,14 +14,6 @@ logger = logging.getLogger()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-class Autoencoder(nn.Module):
-    def __init__(self):
-        pass
-
-    def forward(self, x):
-        pass
-
-
 class Classifier(nn.Module):
     """
     Based on the code from @wang_controllable_2019
@@ -157,9 +149,11 @@ def train(
     evaluation_dataloader = DataLoader(datasets["evaluation"], batch_size=batch_size)
 
     autoencoder_optimizer = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
+    autoencoder.zero_grad()
     autoencoder.to(device)
 
     classifier.to(device)
+    classifier.zero_grad()
     classifier_loss_fn = nn.BCELoss()
     classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
 
@@ -217,16 +211,20 @@ def train_step(
     size = dataset.dataset.num_rows
     batch_size = dataset.batch_size
     for batch in dataset:
+        # autoencoder_optimizer.zero_grad()
+        # classifier_optimizer.zero_grad()
+        autoencoder.zero_grad()
+        classifier.zero_grad()
 
         # train autoencoder
-        autoencoder_output = autoencoder.forward(
+        autoencoder_output = autoencoder(
             input_ids=batch["input_ids"].to(device),
             attention_mask=batch["attention_mask"].to(device),
             labels=batch["input_ids"].to(device),
         )
-        autoencoder_optimizer.zero_grad()
         autoencoder_output.loss.backward()
         autoencoder_optimizer.step()
+
         encoder_latent_space = torch.sum(
             autoencoder_output.encoder_last_hidden_state.detach(), dim=1
         )
@@ -240,7 +238,6 @@ def train_step(
         classifier_loss = classifier_loss_fn(
             classifier_output.flatten(), batch["is_legal"].to(device)
         )
-        classifier_optimizer.zero_grad()
         classifier_loss.backward()
         classifier_optimizer.step()
 
