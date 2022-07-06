@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer, EncoderDecoderModel
-from datasets import load_dataset, interleave_datasets
+from datasets import load_dataset, concatenate_datasets
 
 logger = logging.getLogger()
 
@@ -318,25 +318,10 @@ def prepare_dataset(tokenizer, max_sequence_length, num_proc=10):
         lambda x: {"is_legal": [0.0] * len(x["text"])}, num_proc=num_proc, batched=True
     )
 
-    train_dataset = interleave_datasets(
-        [
-            wikipedia["train"],
-            querido_diario["train"].select(range(wikipedia["train"].num_rows)),
-        ]
-    )
-    test_dataset = interleave_datasets(
-        [
-            wikipedia["test"],
-            querido_diario["test"].select(range(wikipedia["test"].num_rows)),
-        ]
-    )
-    evaluation_dataset = interleave_datasets(
-        [
-            wikipedia["evaluation"],
-            querido_diario["evaluation"].select(
-                range(wikipedia["evaluation"].num_rows)
-            ),
-        ]
+    train_dataset = concatenate_datasets([wikipedia["train"], querido_diario["train"]])
+    test_dataset = concatenate_datasets([wikipedia["test"], querido_diario["test"]])
+    evaluation_dataset = concatenate_datasets(
+        [wikipedia["evaluation"], querido_diario["evaluation"]]
     )
 
     querido_diario["train"] = train_dataset
