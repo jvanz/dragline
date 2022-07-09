@@ -96,7 +96,7 @@ def commandline_arguments_parsing():
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=1e-3,
+        default=5e-5,
         help="Learning rate to be used in training steps",
     )
 
@@ -114,8 +114,8 @@ def print_start_epoch_header(epoch: int):
 def save_models(
     autoencoder: EncoderDecoderModel,
     autoencoder_loss: float,
-    classifier: nn.Module,
-    classifier_loss: float,
+    #     classifier: nn.Module,
+    #     classifier_loss: float,
     checkpoint_dir: str,
     epoch: int,
 ):
@@ -123,16 +123,17 @@ def save_models(
         autoencoder,
         f"{checkpoint_dir}/autoencoder_{epoch}_{autoencoder_loss}.pth",
     )
-    torch.save(
-        classifier,
-        f"{checkpoint_dir}/classifier_{epoch}_{classifier_loss}.pth",
-    )
+
+
+#     torch.save(
+#         classifier,
+#         f"{checkpoint_dir}/classifier_{epoch}_{classifier_loss}.pth",
+#     )
 
 
 def train(
     epochs,
     autoencoder,
-    classifier,
     datasets,
     batch_size,
     learning_rate,
@@ -144,77 +145,54 @@ def train(
     print("-" * 100)
     print(f"Starting training...")
     print(f"Device used: {device}")
-    train_dataloader = DataLoader(datasets["train"], batch_size=batch_size)
-    test_dataloader = DataLoader(datasets["test"], batch_size=batch_size)
-    evaluation_dataloader = DataLoader(datasets["evaluation"], batch_size=batch_size)
+    train_dataloader = DataLoader(
+        datasets["train"], batch_size=batch_size, pin_memory=True
+    )
+    test_dataloader = DataLoader(
+        datasets["validation"], batch_size=batch_size, pin_memory=True
+    )
+    # evaluation_dataloader = DataLoader(
+    #     datasets["evaluation"], batch_size=batch_size, pin_memory=True
+    # )
 
-    autoencoder_optimizer = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
-    autoencoder.zero_grad()
     autoencoder.to(device)
-
-    classifier.to(device)
-    classifier.zero_grad()
-    classifier_loss_fn = nn.BCELoss()
-    classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
+    autoencoder_optimizer = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
 
     for epoch in range(epochs):
         print_start_epoch_header(epoch)
-        train_step(
-            autoencoder,
-            autoencoder_optimizer,
-            classifier,
-            classifier_loss_fn,
-            classifier_optimizer,
-            train_dataloader,
-            device,
+
+        autoencoder.train(True)
+        train_step(autoencoder, autoencoder_optimizer, train_dataloader, device)
+        autoencoder.train(False)
+
+        autoencoder_loss = evaluation_step(
+            autoencoder, test_dataloader, device, tokenizer
         )
-        autoencoder_loss, classifier_loss = evaluation_step(
-            autoencoder,
-            classifier,
-            classifier_loss_fn,
-            test_dataloader,
-            device,
-            tokenizer,
-        )
-        save_models(
-            autoencoder,
-            autoencoder_loss,
-            classifier,
-            classifier_loss,
-            checkpoint_dir,
-            epoch,
-        )
+
+        # save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
+        save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
     print("Training finished.")
-    evaluation_step(
-        autoencoder,
-        classifier,
-        classifier_loss_fn,
-        evaluation_dataloader,
-        device,
-        tokenizer,
-        prefix_text="Evaluation losses",
-    )
+    # evaluation_step(
+    #     autoencoder,
+    #     device,
+    #     tokenizer,
+    #     prefix_text="Evaluation losses",
+    # )
 
 
 def train_step(
     autoencoder,
     autoencoder_optimizer,
-    classifier,
-    classifier_loss_fn,
-    classifier_optimizer,
     dataset,
     device,
 ):
-    autoencoder.train()
-    classifier.train()
     current = 1
     size = dataset.dataset.num_rows
     batch_size = dataset.batch_size
+    # running_loss = 0.0
+    # last_loss = 0.0
     for batch in dataset:
-        # autoencoder_optimizer.zero_grad()
-        # classifier_optimizer.zero_grad()
         autoencoder.zero_grad()
-        classifier.zero_grad()
 
         # train autoencoder
         autoencoder_output = autoencoder(
@@ -225,35 +203,16 @@ def train_step(
         autoencoder_output.loss.backward()
         autoencoder_optimizer.step()
 
-        encoder_latent_space = torch.sum(
-            autoencoder_output.encoder_last_hidden_state.detach(), dim=1
-        )
-
-        logger.debug(
-            f"Encoder last hidden state size: {autoencoder_output.encoder_last_hidden_state.size()}"
-        )
-        logger.debug(f"Encoder last hidden state size: {encoder_latent_space.size()}")
-        # train classifier
-        classifier_output = classifier.forward(encoder_latent_space)
-        classifier_loss = classifier_loss_fn(
-            classifier_output.flatten(), batch["is_legal"].to(device)
-        )
-        classifier_loss.backward()
-        classifier_optimizer.step()
-
         if current % 100 == 0:
+            last_loss = autoencoder_output.loss.item()
             steps = current * batch_size
-            print(
-                f"Autoencoder loss: {autoencoder_output.loss.item():>8f}, classifier loss: {classifier_loss.item():>8f}  [{steps}/{size}] "
-            )
+            print(f"Autoencoder loss: {last_loss:>8f}  [{steps}/{size}] ")
 
         current += 1
 
 
 def evaluation_step(
     autoencoder,
-    classifier,
-    classifier_loss_fn,
     dataset,
     device,
     tokenizer,
@@ -261,72 +220,47 @@ def evaluation_step(
 ):
     size = int(dataset.dataset.num_rows / dataset.batch_size)
     autoencoder_loss = 0
-    classifier_loss = 0
     current = 0
     with torch.no_grad():
         for batch in dataset:
             current += 1
 
             # test autoencoder
-            autoencoder_output = autoencoder.forward(
+            autoencoder_output = autoencoder(
                 input_ids=batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device),
                 labels=batch["input_ids"].to(device),
             )
             autoencoder_loss += autoencoder_output.loss.item()
-            encoder_latent_space = torch.sum(
-                autoencoder_output.encoder_last_hidden_state.detach(), dim=1
-            )
-
-            input_sentence = batch["input_ids"][0].to(device)
-            output_sentence = autoencoder.generate(input_sentence.unsqueeze(0))[0].to(
-                device
-            )
-            input_sentence = tokenizer.decode(
-                batch["input_ids"][0], skip_special_tokens=True
-            )
-            output_sentence = tokenizer.decode(
-                output_sentence, skip_special_tokens=True
-            )
-
-            print(f"    Autoencoder input [{current}/{size}]: {input_sentence}")
-            print(f"    Autoencoder output [{current}/{size}]: {output_sentence}")
-
-            # test classifier
-            classifier_output = classifier.forward(encoder_latent_space)
-            classifier_loss_value = classifier_loss_fn(
-                classifier_output.flatten(), batch["is_legal"].to(device)
-            )
-            classifier_loss += classifier_loss_value.item()
 
     autoencoder_loss /= dataset.batch_size
-    classifier_loss /= dataset.batch_size
-    print(
-        f"{prefix_text}:\n    Avg autoencoder loss: {autoencoder_loss:>8f}, Avg classifier loss: {classifier_loss:>8f}"
-    )
-    return autoencoder_loss, classifier_loss
+    print(f"{prefix_text}:\n    Avg autoencoder loss: {autoencoder_loss:>8f}")
+    return autoencoder_loss
 
 
 def prepare_dataset(tokenizer, max_sequence_length, num_proc=10):
     assert tokenizer != None
-    querido_diario = load_dataset("jvanz/querido_diario", streaming=False)
+    querido_diario = load_dataset(
+        "pierreguillou/lener_br_finetuning_language_model", streaming=False
+    )
+    # querido_diario = load_dataset("jvanz/querido_diario", streaming=False)
     querido_diario = querido_diario.map(
         lambda x: {"is_legal": [1.0] * len(x["text"])}, num_proc=num_proc, batched=True
     )
-    wikipedia = load_dataset("jvanz/portuguese_wikipedia_sentences")
-    wikipedia = wikipedia.map(
-        lambda x: {"is_legal": [0.0] * len(x["text"])}, num_proc=num_proc, batched=True
-    )
+    # wikipedia = load_dataset("jvanz/portuguese_wikipedia_sentences")
+    # wikipedia = wikipedia.map(
+    #     lambda x: {"is_legal": [0.0] * len(x["text"])}, num_proc=num_proc, batched=True
+    # )
 
-    train_dataset = concatenate_datasets([wikipedia["train"], querido_diario["train"]])
-    test_dataset = concatenate_datasets([wikipedia["test"], querido_diario["test"]])
-    evaluation_dataset = concatenate_datasets(
-        [wikipedia["evaluation"], querido_diario["evaluation"]]
-    )
+    # train_dataset = concatenate_datasets([wikipedia["train"], querido_diario["train"]])
+    # test_dataset = concatenate_datasets([wikipedia["test"], querido_diario["test"]])
+    # evaluation_dataset = concatenate_datasets(
+    #     [wikipedia["evaluation"], querido_diario["evaluation"]]
+    # )
 
-    querido_diario["train"] = train_dataset
-    querido_diario["test"] = test_dataset
-    querido_diario["evaluation"] = evaluation_dataset
+    # querido_diario["train"] = train_dataset
+    # querido_diario["test"] = test_dataset
+    # querido_diario["evaluation"] = evaluation_dataset
     querido_diario = querido_diario.map(
         lambda x: tokenizer(
             x["text"],
@@ -378,7 +312,6 @@ if __name__ == "__main__":
         train(
             **vars(config),
             autoencoder=autoencoder,
-            classifier=classifier,
             datasets=datasets,
             tokenizer=tokenizer,
         )
