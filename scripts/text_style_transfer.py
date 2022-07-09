@@ -99,15 +99,39 @@ def commandline_arguments_parsing():
         default=5e-5,
         help="Learning rate to be used in training steps",
     )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=1,
+        help="Number of steps to see some loss decrease",
+    )
+    parser.add_argument(
+        "--early-stopping-threshold",
+        type=float,
+        default=0.0,
+        help="The minimum loss value should be decrease after the steps defined at --patience",
+    )
+    parser.add_argument(
+        "--evaluation-steps",
+        type=int,
+        default=10,
+        help="Define how many step should be wait until perform evaluation",
+    )
+    parser.add_argument(
+        "--logging-steps",
+        type=int,
+        default=1,
+        help="Define how many step should be wait until log training info (e.g. losses values)",
+    )
 
     args = parser.parse_args()
     args.checkpoint_dir = args.checkpoint_dir.joinpath(args.name)
     return args
 
 
-def print_start_epoch_header(epoch: int):
+def print_start_epoch_header(epoch: int, epochs: int):
     assert epoch >= 0
-    print(f"\nEpoch {epoch}")
+    print(f"\nEpoch [{epoch}/{epochs}]")
     print("_" * 50)
 
 
@@ -140,6 +164,10 @@ def train(
     device,
     checkpoint_dir,
     tokenizer,
+    early_stopping_patience,
+    early_stopping_threshold,
+    evaluation_steps,
+    logging_steps,
     **kw_args,
 ):
     print("-" * 100)
@@ -157,20 +185,64 @@ def train(
 
     autoencoder.to(device)
     autoencoder_optimizer = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
+    optimization_steps = train_dataloader.dataset.num_rows / train_dataloader.batch_size
+    print(f"Total optimization steps: {optimization_steps}")
 
+    current_step = 0
+    patience = early_stopping_patience
+    must_stop = False
     for epoch in range(epochs):
-        print_start_epoch_header(epoch)
+        if must_stop:
+            break
+        print_start_epoch_header(epoch, epochs)
 
+        # train step
         autoencoder.train(True)
-        train_step(autoencoder, autoencoder_optimizer, train_dataloader, device)
-        autoencoder.train(False)
+        size = train_dataloader.dataset.num_rows
+        batch_size = train_dataloader.batch_size
+        autoencoder_best_loss = None
+        for batch in train_dataloader:
+            current_step += 1
+            autoencoder.zero_grad()
 
-        autoencoder_loss = evaluation_step(
-            autoencoder, test_dataloader, device, tokenizer
-        )
+            # train autoencoder
+            autoencoder_output = autoencoder(
+                input_ids=batch["input_ids"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+                labels=batch["input_ids"].to(device),
+            )
+            autoencoder_output.loss.backward()
+            autoencoder_optimizer.step()
+
+            if current_step % logging_steps == 0:
+                last_loss = autoencoder_output.loss.item()
+                print(
+                    f"Autoencoder loss: {last_loss:>8f}  [{current_step}/{optimization_steps}] "
+                )
+
+            autoencoder.train(False)
+
+            if current_step % evaluation_steps == 0:
+                autoencoder_loss = evaluation_step(
+                    autoencoder, test_dataloader, device, tokenizer
+                )
+
+                if autoencoder_best_loss is None:
+                    autoencoder_best_loss = autoencoder_loss
+                    continue
+
+                if autoencoder_best_loss - autoencoder_loss >= early_stopping_threshold:
+                    patience -= 1
+                else:
+                    autoencoder_best_loss = autoencoder_loss
+                    save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
+
+                if patience == 0:
+                    must_stop = True
+                    break
 
         # save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
-        save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
+        # save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
     print("Training finished.")
     # evaluation_step(
     #     autoencoder,
