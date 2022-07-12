@@ -183,6 +183,7 @@ train-latent-representation-classifier: format
 
 .PHONY: train-latent-space-representation-edit-model
 train-latent-space-representation-edit-model: format
+	rm -rf checkpoints/latent_space_representation_edit_model_wang_controllable_2019/
 	PYTHONPATH=$(PWD) python scripts/text_style_transfer.py \
 	  --name latent_space_representation_edit_model_wang_controllable_2019 \
 	  --checkpoint neuralmind/bert-base-portuguese-cased \

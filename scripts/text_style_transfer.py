@@ -114,13 +114,13 @@ def commandline_arguments_parsing():
     parser.add_argument(
         "--evaluation-steps",
         type=int,
-        default=10,
+        default=500,
         help="Define how many step should be wait until perform evaluation",
     )
     parser.add_argument(
         "--logging-steps",
         type=int,
-        default=1,
+        default=50,
         help="Define how many step should be wait until log training info (e.g. losses values)",
     )
 
@@ -138,8 +138,8 @@ def print_start_epoch_header(epoch: int, epochs: int):
 def save_models(
     autoencoder: EncoderDecoderModel,
     autoencoder_loss: float,
-    #     classifier: nn.Module,
-    #     classifier_loss: float,
+    classifier: nn.Module,
+    classifier_loss: float,
     checkpoint_dir: str,
     epoch: int,
 ):
@@ -147,17 +147,16 @@ def save_models(
         autoencoder,
         f"{checkpoint_dir}/autoencoder_{epoch}_{autoencoder_loss}.pth",
     )
-
-
-#     torch.save(
-#         classifier,
-#         f"{checkpoint_dir}/classifier_{epoch}_{classifier_loss}.pth",
-#     )
+    torch.save(
+        classifier,
+        f"{checkpoint_dir}/classifier_{epoch}_{classifier_loss}.pth",
+    )
 
 
 def train(
     epochs,
     autoencoder,
+    classifier,
     datasets,
     batch_size,
     learning_rate,
@@ -176,16 +175,20 @@ def train(
     train_dataloader = DataLoader(
         datasets["train"], batch_size=batch_size, pin_memory=True
     )
-    test_dataloader = DataLoader(
-        datasets["validation"], batch_size=batch_size, pin_memory=True
+    evaluation_dataloader = DataLoader(
+        datasets["evaluation"], batch_size=batch_size, pin_memory=True
     )
-    # evaluation_dataloader = DataLoader(
-    #     datasets["evaluation"], batch_size=batch_size, pin_memory=True
-    # )
 
     autoencoder.to(device)
     autoencoder_optimizer = torch.optim.Adam(autoencoder.parameters(), lr=learning_rate)
-    optimization_steps = train_dataloader.dataset.num_rows / train_dataloader.batch_size
+
+    classifier.to(device)
+    classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
+    classifier_loss_fn = nn.BCELoss()
+
+    optimization_steps = int(
+        train_dataloader.dataset.num_rows / train_dataloader.batch_size
+    )
     print(f"Total optimization steps: {optimization_steps}")
 
     current_step = 0
@@ -198,12 +201,15 @@ def train(
 
         # train step
         autoencoder.train(True)
+        classifier.train(True)
         size = train_dataloader.dataset.num_rows
         batch_size = train_dataloader.batch_size
         autoencoder_best_loss = None
+        classifier_best_loss = None
         for batch in train_dataloader:
             current_step += 1
             autoencoder.zero_grad()
+            classifier.zero_grad()
 
             # train autoencoder
             autoencoder_output = autoencoder(
@@ -211,131 +217,120 @@ def train(
                 attention_mask=batch["attention_mask"].to(device),
                 labels=batch["input_ids"].to(device),
             )
+            autoencoder_latent_space = torch.sum(
+                autoencoder_output.encoder_last_hidden_state.detach(), dim=1
+            )
             autoencoder_output.loss.backward()
             autoencoder_optimizer.step()
 
+            classifier_output = classifier(autoencoder_latent_space)
+            classifier_loss = classifier_loss_fn(
+                classifier_output.flatten(), batch["is_legal"].to(device)
+            )
+            classifier_loss.backward()
+            classifier_optimizer.step()
+
             if current_step % logging_steps == 0:
-                last_loss = autoencoder_output.loss.item()
+                autoencoder_last_loss = autoencoder_output.loss.item()
+                classifier_last_loss = classifier_loss.item()
                 print(
-                    f"Autoencoder loss: {last_loss:>8f}  [{current_step}/{optimization_steps}] "
+                    f"Autoencoder loss: {autoencoder_last_loss:>8f}, Classifier loss: {classifier_last_loss}  [{current_step}/{optimization_steps}] "
                 )
 
             autoencoder.train(False)
+            classifier.train(False)
 
             if current_step % evaluation_steps == 0:
-                autoencoder_loss = evaluation_step(
-                    autoencoder, test_dataloader, device, tokenizer
+                current_evaluation_step = 0
+                autoencoder_loss = 0.0
+                classifier_loss = 0.0
+                with torch.no_grad():
+                    for batch in evaluation_dataloader:
+                        current_evaluation_step += 1
+
+                        # test autoencoder
+                        autoencoder_output = autoencoder(
+                            input_ids=batch["input_ids"].to(device),
+                            attention_mask=batch["attention_mask"].to(device),
+                            labels=batch["input_ids"].to(device),
+                        )
+                        autoencoder_loss += autoencoder_output.loss.item()
+                        autoencoder_latent_space = torch.sum(
+                            autoencoder_output.encoder_last_hidden_state.detach(), dim=1
+                        )
+
+                        classifier_output = classifier(autoencoder_latent_space)
+                        classifier_last_loss = classifier_loss_fn(
+                            classifier_output.flatten(), batch["is_legal"].to(device)
+                        )
+                        classifier_loss += classifier_last_loss.item()
+
+                autoencoder_loss /= current_evaluation_step
+                classifier_loss /= current_evaluation_step
+                print(
+                    f"Evaluation:\n    Avg autoencoder loss: {autoencoder_loss:>8f}, Avg classifier loss: {classifier_loss:>8f}"
                 )
 
                 if autoencoder_best_loss is None:
                     autoencoder_best_loss = autoencoder_loss
+                    classifier_best_loss = classifier_loss
                     continue
 
-                if autoencoder_best_loss - autoencoder_loss >= early_stopping_threshold:
+                if (
+                    autoencoder_best_loss - autoencoder_loss
+                ) < early_stopping_threshold and (
+                    classifier_best_loss - classifier_loss
+                ) < early_stopping_threshold:
                     patience -= 1
                 else:
                     autoencoder_best_loss = autoencoder_loss
-                    save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
+                    classifier_best_loss = classifier_loss
+                    save_models(
+                        autoencoder,
+                        autoencoder_loss,
+                        classifier,
+                        classifier_loss,
+                        checkpoint_dir,
+                        current_step,
+                    )
 
                 if patience == 0:
                     must_stop = True
+                    print(
+                        f"Stopping training earlier. Loss value did not improved more then {early_stopping_threshold} since last evaluation."
+                    )
                     break
 
-        # save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
-        # save_models(autoencoder, autoencoder_loss, checkpoint_dir, epoch)
     print("Training finished.")
-    # evaluation_step(
-    #     autoencoder,
-    #     device,
-    #     tokenizer,
-    #     prefix_text="Evaluation losses",
-    # )
-
-
-def train_step(
-    autoencoder,
-    autoencoder_optimizer,
-    dataset,
-    device,
-):
-    current = 1
-    size = dataset.dataset.num_rows
-    batch_size = dataset.batch_size
-    # running_loss = 0.0
-    # last_loss = 0.0
-    for batch in dataset:
-        autoencoder.zero_grad()
-
-        # train autoencoder
-        autoencoder_output = autoencoder(
-            input_ids=batch["input_ids"].to(device),
-            attention_mask=batch["attention_mask"].to(device),
-            labels=batch["input_ids"].to(device),
-        )
-        autoencoder_output.loss.backward()
-        autoencoder_optimizer.step()
-
-        if current % 100 == 0:
-            last_loss = autoencoder_output.loss.item()
-            steps = current * batch_size
-            print(f"Autoencoder loss: {last_loss:>8f}  [{steps}/{size}] ")
-
-        current += 1
-
-
-def evaluation_step(
-    autoencoder,
-    dataset,
-    device,
-    tokenizer,
-    prefix_text="Test losses",
-):
-    size = int(dataset.dataset.num_rows / dataset.batch_size)
-    autoencoder_loss = 0
-    current = 0
-    with torch.no_grad():
-        for batch in dataset:
-            current += 1
-
-            # test autoencoder
-            autoencoder_output = autoencoder(
-                input_ids=batch["input_ids"].to(device),
-                attention_mask=batch["attention_mask"].to(device),
-                labels=batch["input_ids"].to(device),
-            )
-            autoencoder_loss += autoencoder_output.loss.item()
-
-    autoencoder_loss /= dataset.batch_size
-    print(f"{prefix_text}:\n    Avg autoencoder loss: {autoencoder_loss:>8f}")
-    return autoencoder_loss
 
 
 def prepare_dataset(tokenizer, max_sequence_length, num_proc=10):
     assert tokenizer != None
-    querido_diario = load_dataset(
+    legal_text = load_dataset(
         "pierreguillou/lener_br_finetuning_language_model", streaming=False
     )
     # querido_diario = load_dataset("jvanz/querido_diario", streaming=False)
-    querido_diario = querido_diario.map(
+    legal_text = legal_text.map(
         lambda x: {"is_legal": [1.0] * len(x["text"])}, num_proc=num_proc, batched=True
     )
-    # wikipedia = load_dataset("jvanz/portuguese_wikipedia_sentences")
-    # wikipedia = wikipedia.map(
-    #     lambda x: {"is_legal": [0.0] * len(x["text"])}, num_proc=num_proc, batched=True
-    # )
+    wikipedia = load_dataset("jvanz/portuguese_wikipedia_sentences")
+    wikipedia = wikipedia.map(
+        lambda x: {"is_legal": [0.0] * len(x["text"])}, num_proc=num_proc, batched=True
+    )
 
-    # train_dataset = concatenate_datasets([wikipedia["train"], querido_diario["train"]])
+    train_dataset = concatenate_datasets([wikipedia["train"], legal_text["train"]])
     # test_dataset = concatenate_datasets([wikipedia["test"], querido_diario["test"]])
-    # evaluation_dataset = concatenate_datasets(
-    #     [wikipedia["evaluation"], querido_diario["evaluation"]]
-    # )
+    evaluation_dataset = concatenate_datasets(
+        [wikipedia["evaluation"], legal_text["validation"]]
+    )
 
-    # querido_diario["train"] = train_dataset
+    legal_text["train"] = train_dataset
     # querido_diario["test"] = test_dataset
-    # querido_diario["evaluation"] = evaluation_dataset
-    querido_diario = querido_diario.map(
+    legal_text["evaluation"] = evaluation_dataset
+    legal_text = legal_text.map(
         lambda x: tokenizer(
             x["text"],
+            add_special_tokens=False,
             padding="max_length",
             truncation=True,
             max_length=max_sequence_length,
@@ -343,13 +338,13 @@ def prepare_dataset(tokenizer, max_sequence_length, num_proc=10):
         num_proc=num_proc,
         batched=True,
     )
-    querido_diario.set_format(
+    legal_text.set_format(
         type="torch",
         columns=["input_ids", "token_type_ids", "attention_mask", "is_legal"],
     )
-    querido_diario = querido_diario.shuffle(seed=42)
-    logger.info(querido_diario)
-    return querido_diario
+    legal_text = legal_text.shuffle(seed=42)
+    logger.info(legal_text)
+    return legal_text
 
 
 def load_tokenizer(checkpoint):
@@ -384,6 +379,7 @@ if __name__ == "__main__":
         train(
             **vars(config),
             autoencoder=autoencoder,
+            classifier=classifier,
             datasets=datasets,
             tokenizer=tokenizer,
         )
