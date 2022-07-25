@@ -2,6 +2,7 @@ import pathlib
 import os
 import argparse
 import logging
+import shutil
 
 import torch
 from torch import nn
@@ -21,23 +22,23 @@ class Classifier(nn.Module):
 
     def __init__(self, latent_size, output_size):
         super().__init__()
-        self.fc1 = nn.Linear(latent_size, 100)
-        self.relu1 = nn.LeakyReLU(
-            0.2,
+        self.model = nn.Sequential(
+            nn.Linear(latent_size, 512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 128),
+            nn.LeakyReLU(0.2),
+            nn.Linear(128, 64),
+            nn.LeakyReLU(0.2),
+            nn.Linear(64, 32),
+            nn.LeakyReLU(0.2),
+            nn.Linear(32, output_size),
+            nn.Sigmoid(),
         )
-        self.fc2 = nn.Linear(100, 50)
-        self.relu2 = nn.LeakyReLU(0.2)
-        self.fc3 = nn.Linear(50, output_size)
-        self.sigmoid = nn.Sigmoid()
 
     def forward(self, input):
-        out = self.fc1(input)
-        out = self.relu1(out)
-        out = self.fc2(out)
-        out = self.relu2(out)
-        out = self.fc3(out)
-        out = self.sigmoid(out)
-
+        out = self.model(input)
         return out  # batch_size * label_size
 
 
@@ -53,7 +54,7 @@ def commandline_arguments_parsing():
         help="",
     )
     parser.add_argument(
-        "--name",
+        "--model-name",
         type=str,
         required=True,
         help="Model name. User to save the model checkpoints in the checkpoint dir",
@@ -114,18 +115,25 @@ def commandline_arguments_parsing():
     parser.add_argument(
         "--evaluation-steps",
         type=int,
-        default=500,
+        default=1000,
         help="Define how many step should be wait until perform evaluation",
     )
     parser.add_argument(
         "--logging-steps",
         type=int,
-        default=50,
+        default=100,
         help="Define how many step should be wait until log training info (e.g. losses values)",
+    )
+    parser.add_argument(
+        "--dataset-name",
+        choices=["legal", "sentiment"],
+        required=True,
+        type=str,
+        help="Define the dataset to be used in the training",
     )
 
     args = parser.parse_args()
-    args.checkpoint_dir = args.checkpoint_dir.joinpath(args.name)
+    args.checkpoint_dir = args.checkpoint_dir.joinpath(args.model_name)
     return args
 
 
@@ -141,15 +149,16 @@ def save_models(
     classifier: nn.Module,
     classifier_loss: float,
     checkpoint_dir: str,
-    epoch: int,
+    step: int,
+    model_name: str,
 ):
     torch.save(
         autoencoder,
-        f"{checkpoint_dir}/autoencoder_{epoch}_{autoencoder_loss}.pth",
+        f"{checkpoint_dir}/autoencoder_{model_name}_{step}_{autoencoder_loss}.pth",
     )
     torch.save(
         classifier,
-        f"{checkpoint_dir}/classifier_{epoch}_{classifier_loss}.pth",
+        f"{checkpoint_dir}/classifier_{model_name}_{step}_{classifier_loss}.pth",
     )
 
 
@@ -167,6 +176,7 @@ def train(
     early_stopping_threshold,
     evaluation_steps,
     logging_steps,
+    model_name,
     **kw_args,
 ):
     print("-" * 100)
@@ -176,7 +186,7 @@ def train(
         datasets["train"], batch_size=batch_size, pin_memory=True
     )
     evaluation_dataloader = DataLoader(
-        datasets["evaluation"], batch_size=batch_size, pin_memory=True
+        datasets["test"], batch_size=batch_size, pin_memory=True
     )
 
     autoencoder.to(device)
@@ -186,8 +196,10 @@ def train(
     classifier_optimizer = torch.optim.Adam(classifier.parameters(), lr=learning_rate)
     classifier_loss_fn = nn.BCELoss()
 
-    optimization_steps = int(
-        train_dataloader.dataset.num_rows / train_dataloader.batch_size
+    sigmoid = nn.Sigmoid()
+
+    optimization_steps = (
+        int(train_dataloader.dataset.num_rows / train_dataloader.batch_size) * epochs
     )
     print(f"Total optimization steps: {optimization_steps}")
 
@@ -218,14 +230,14 @@ def train(
                 labels=batch["input_ids"].to(device),
             )
             autoencoder_latent_space = torch.sum(
-                autoencoder_output.encoder_last_hidden_state.detach(), dim=1
+                sigmoid(autoencoder_output.encoder_last_hidden_state).detach(), dim=1
             )
             autoencoder_output.loss.backward()
             autoencoder_optimizer.step()
 
             classifier_output = classifier(autoencoder_latent_space)
             classifier_loss = classifier_loss_fn(
-                classifier_output.flatten(), batch["is_legal"].to(device)
+                classifier_output.flatten(), batch["label"].to(device)
             )
             classifier_loss.backward()
             classifier_optimizer.step()
@@ -256,12 +268,15 @@ def train(
                         )
                         autoencoder_loss += autoencoder_output.loss.item()
                         autoencoder_latent_space = torch.sum(
-                            autoencoder_output.encoder_last_hidden_state.detach(), dim=1
+                            sigmoid(
+                                autoencoder_output.encoder_last_hidden_state
+                            ).detach(),
+                            dim=1,
                         )
 
                         classifier_output = classifier(autoencoder_latent_space)
                         classifier_last_loss = classifier_loss_fn(
-                            classifier_output.flatten(), batch["is_legal"].to(device)
+                            classifier_output.flatten(), batch["label"].to(device)
                         )
                         classifier_loss += classifier_last_loss.item()
 
@@ -270,41 +285,82 @@ def train(
                 print(
                     f"Evaluation:\n    Avg autoencoder loss: {autoencoder_loss:>8f}, Avg classifier loss: {classifier_loss:>8f}"
                 )
+                save_models(
+                    autoencoder,
+                    autoencoder_loss,
+                    classifier,
+                    classifier_loss,
+                    checkpoint_dir,
+                    current_step,
+                    model_name,
+                )
 
-                if autoencoder_best_loss is None:
-                    autoencoder_best_loss = autoencoder_loss
-                    classifier_best_loss = classifier_loss
-                    continue
+                # if autoencoder_best_loss is None:
+                #     autoencoder_best_loss = autoencoder_loss
+                #     classifier_best_loss = classifier_loss
+                #     continue
 
-                if (
-                    autoencoder_best_loss - autoencoder_loss
-                ) < early_stopping_threshold and (
-                    classifier_best_loss - classifier_loss
-                ) < early_stopping_threshold:
-                    patience -= 1
-                else:
-                    autoencoder_best_loss = autoencoder_loss
-                    classifier_best_loss = classifier_loss
-                    save_models(
-                        autoencoder,
-                        autoencoder_loss,
-                        classifier,
-                        classifier_loss,
-                        checkpoint_dir,
-                        current_step,
-                    )
+                # if (
+                #     autoencoder_best_loss - autoencoder_loss
+                # ) < early_stopping_threshold and (
+                #     classifier_best_loss - classifier_loss
+                # ) < early_stopping_threshold:
+                #     patience -= 1
+                # else:
+                #     autoencoder_best_loss = autoencoder_loss
+                #     classifier_best_loss = classifier_loss
+                #     save_models(
+                #         autoencoder,
+                #         autoencoder_loss,
+                #         classifier,
+                #         classifier_loss,
+                #         checkpoint_dir,
+                #         current_step,
+                #         model_name,
+                #     )
 
-                if patience == 0:
-                    must_stop = True
-                    print(
-                        f"Stopping training earlier. Loss value did not improved more then {early_stopping_threshold} since last evaluation."
-                    )
-                    break
+                # if patience == 0:
+                #     must_stop = True
+                #     print(
+                #         f"Stopping training earlier. Loss value did not improved more then {early_stopping_threshold} since last evaluation."
+                #     )
+                #     break
 
     print("Training finished.")
 
 
-def prepare_dataset(tokenizer, max_sequence_length, num_proc=10):
+def prepare_dataset(tokenizer, max_sequence_length, dataset_name: str, num_proc=10):
+    if dataset_name == "sentiment":
+        return prepare_sentiment_dataset(tokenizer, max_sequence_length, num_proc)
+    return prepare_legal_dataset(tokenizer, max_sequence_length, num_proc)
+
+
+def prepare_sentiment_dataset(tokenizer, max_sequence_length, num_proc):
+    dataset = load_dataset("jvanz/portuguese_sentiment_analysis", split="train")
+    dataset = dataset.rename_column("polarity", "label")
+    dataset = dataset.map(
+        lambda x: tokenizer(
+            x["review_text"],
+            add_special_tokens=False,
+            padding="max_length",
+            truncation=True,
+            max_length=max_sequence_length,
+        ),
+        num_proc=num_proc,
+        batched=True,
+    )
+    dataset = dataset.filter(lambda x: len(x["input_ids"]) != 0)
+    dataset = dataset.remove_columns(["review_text"])
+    dataset = dataset.train_test_split(test_size=0.2, shuffle=True)
+    dataset.set_format(
+        type="torch",
+        columns=["input_ids", "token_type_ids", "attention_mask", "label"],
+    )
+    logger.info(dataset)
+    return dataset
+
+
+def prepare_legal_dataset(tokenizer, max_sequence_length, num_proc):
     assert tokenizer != None
     legal_text = load_dataset(
         "pierreguillou/lener_br_finetuning_language_model", streaming=False
@@ -351,7 +407,9 @@ def load_tokenizer(checkpoint):
     return BertTokenizer.from_pretrained(checkpoint)
 
 
-def create_models(checkpoint: str, classifier_labels: int, tokenizer: BertTokenizer):
+def create_models(
+    checkpoint: str, classifier_labels: int, tokenizer: BertTokenizer, config
+):
     assert checkpoint != None and len(checkpoint) > 0
     assert classifier_labels > 0
     autoencoder = EncoderDecoderModel.from_encoder_decoder_pretrained(
@@ -359,6 +417,7 @@ def create_models(checkpoint: str, classifier_labels: int, tokenizer: BertTokeni
     )
     autoencoder.config.decoder_start_token_id = tokenizer.cls_token_id
     autoencoder.config.pad_token_id = tokenizer.cls_token_id
+    autoencoder.config.max_length = config.max_sequence_length
     classifier = Classifier(autoencoder.config.encoder.hidden_size, classifier_labels)
     logger.debug(autoencoder)
     logger.debug(classifier)
@@ -369,11 +428,15 @@ if __name__ == "__main__":
     config = commandline_arguments_parsing()
     logging.basicConfig(level=logging.DEBUG if config.debug else logging.INFO)
     logger.debug(config)
+    if os.path.exists(config.checkpoint_dir):
+        shutil.rmtree(config.checkpoint_dir)
     os.makedirs(config.checkpoint_dir, exist_ok=True)
     tokenizer = load_tokenizer(config.checkpoint)
-    datasets = prepare_dataset(tokenizer, config.max_sequence_length)
+    datasets = prepare_dataset(
+        tokenizer, config.max_sequence_length, config.dataset_name
+    )
     autoencoder, classifier = create_models(
-        config.checkpoint, config.classifier_labels, tokenizer
+        config.checkpoint, config.classifier_labels, tokenizer, config
     )
     if config.train:
         train(
