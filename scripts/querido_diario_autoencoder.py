@@ -100,7 +100,7 @@ trainer = Trainer(
     train_dataset=dataset["train"],
     eval_dataset=dataset["evaluation"],
     callbacks=[early_stop_callback],
-    tokenizer=tokenizer
+    tokenizer=tokenizer,
 )
 
 trainer.train(resume_from_checkpoint=RESUME_TRAIN)

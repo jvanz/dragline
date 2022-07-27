@@ -224,18 +224,42 @@ def train(
             classifier.zero_grad()
 
             # train autoencoder
+            encoder_outputs = autoencoder.encoder(
+                input_ids=batch["input_ids"].to(device),
+                attention_mask=batch["attention_mask"].to(device),
+            )
+
+            # encoder_outputs[0] is the encoder hidden states
+            encoder_outputs.last_hidden_state = sigmoid(
+                encoder_outputs.last_hidden_state
+            )
+            encoder_outputs.last_hidden_state = torch.sum(
+                encoder_outputs.last_hidden_state, dim=1
+            )
+            # this is the latent space used by the classifier. This is necesasry
+            # because the classifier does not expects the latent space as used by the
+            # decoder.
+            latent_space = encoder_outputs.last_hidden_state.detach()
+
+            # prepare the manipulated latent space to the decoder.
+            encoder_outputs.last_hidden_state = (
+                encoder_outputs.last_hidden_state.unsqueeze(1)
+            )
+            encoder_outputs.last_hidden_state = (
+                encoder_outputs.last_hidden_state.repeat(1, 60, 1)
+            )
+
             autoencoder_output = autoencoder(
                 input_ids=batch["input_ids"].to(device),
                 attention_mask=batch["attention_mask"].to(device),
                 labels=batch["input_ids"].to(device),
+                encoder_outputs=encoder_outputs,
             )
-            autoencoder_latent_space = torch.sum(
-                sigmoid(autoencoder_output.encoder_last_hidden_state).detach(), dim=1
-            )
+
             autoencoder_output.loss.backward()
             autoencoder_optimizer.step()
 
-            classifier_output = classifier(autoencoder_latent_space)
+            classifier_output = classifier(latent_space)
             classifier_loss = classifier_loss_fn(
                 classifier_output.flatten(), batch["label"].to(device)
             )
