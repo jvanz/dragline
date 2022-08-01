@@ -10,3 +10,5 @@ logs
 models
 checkpoints
 tests/*.txt
+notebooks/.ipynb_checkpoints
+scripts/.ipynb_checkpoints/
