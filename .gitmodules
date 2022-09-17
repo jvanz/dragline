@@ -1,0 +1,3 @@
+[submodule "controllable-text-attribute-transfer"]
+	path = papers/controllable-text-attribute-transfer
+	url = git@github.com:Nrgeup/controllable-text-attribute-transfer.git
