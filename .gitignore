@@ -12,3 +12,6 @@ checkpoints
 tests/*.txt
 notebooks/.ipynb_checkpoints
 scripts/.ipynb_checkpoints/
+.ipynb_checkpoints/
+runs
+mlruns

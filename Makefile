@@ -186,9 +186,26 @@ train-latent-space-representation-edit-model: format
 	PYTHONPATH=$(PWD) python scripts/text_style_transfer.py \
 	--model-name latent_space_representation_edit_model_wang_controllable_2019_sentiment_bigger_classifier \
 	--checkpoint neuralmind/bert-base-portuguese-cased \
+	--batch-size $(BATCH_SIZE) \
+	--dataset-name sentiment \
+	--evaluation-steps 5000 \
+	--debug
+
+
+
+.PHONY: sentiment_text_style_transfer
+sentiment_text_style_transfer: format
+	PYTHONPATH=$(PWD) CUDA_LAUNCH_BLOCKING=1 python scripts/sentiment_text_style_transfer.py \
 	--batch-size 32 \
 	--dataset-name sentiment \
 	--evaluation-steps 5000 \
-	  #--debug
+	--debug
 
-
+.PHONY: wang_sentiment_transfer
+wang_sentiment_transfer: format
+	 python scripts/wang_sentiment_transfer.py \
+     --accelerator auto 
+     
+ .PHONY: wang_sentiment_transfer_test
+wang_sentiment_transfer_test: format
+	 python scripts/wang_sentiment_transfer-test.py
