@@ -132,6 +132,19 @@ class AutoEncoder(nn.Module):
         probabilities = F.log_softmax(x_hat.logits, dim=-1)
         return latent, probabilities
 
+    def generate(self, batch, bos_token_id, pad_token_id, max_sequence_length):
+        z = self.encoder(
+            input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+        )
+        y = torch.zeros(batch["input_ids"].size(0), 1).fill_(bos_token_id).long()
+
+        for i in range(max_sequence_length - 1):
+            x_hat = self.decoder(input_ids=y, encoder_hidden_states=z.last_hidden_state)
+            probabilities = F.log_softmax(x_hat.logits, dim=-1)[:, -1, :]
+            _, next_word = torch.max(probabilities, dim=-1)
+            y = torch.cat([y, next_word.unsqueeze(1)], dim=1)
+        return y
+
 
 class WangModel(pl.LightningModule):
     def __init__(
@@ -165,16 +178,7 @@ class WangModel(pl.LightningModule):
         return reconstruction_loss
 
     def training_step(self, batch, batch_idx):
-        # import pdb
-
-        # pdb.set_trace()
         reconstruction_loss = self.forward_pass(batch)
-        # self.logger.experiment.log_metric(
-        #    self.logger.run_id,
-        #    RECONSTRUCTION_LOSS_NAME,
-        #    reconstruction_loss,
-        #    step=batch_idx,
-        # )
         self.log(
             RECONSTRUCTION_LOSS_NAME,
             reconstruction_loss,
@@ -187,12 +191,6 @@ class WangModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         reconstruction_loss = self.forward_pass(batch)
-        # self.logger.experiment.log_metric(
-        #    self.logger.run_id,
-        #    VALIDATION_RECONSTRUCTION_LOSS_NAME,
-        #    reconstruction_loss,
-        #    step=batch_idx,
-        # )
         self.log(
             VALIDATION_RECONSTRUCTION_LOSS_NAME,
             reconstruction_loss,
@@ -205,12 +203,6 @@ class WangModel(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         reconstruction_loss = self.forward_pass(batch)
-        # self.logger.experiment.log_metric(
-        #    self.logger.run_id,
-        #    TEST_RECONSTRUCTION_LOSS_NAME,
-        #    reconstruction_loss,
-        #    step=batch_idx,
-        # )
         self.log(
             TEST_RECONSTRUCTION_LOSS_NAME,
             reconstruction_loss,
@@ -228,21 +220,6 @@ class WangModel(pl.LightningModule):
         # Eu nao retorno um lr_scheduler pq estou fazendo finetunning e nao preciso
         # grandes alterações nos pesos
         return autoencoder_optimizer
-
-        # lambda1 = lambda step: self.autoencoder.decoder_config.hidden_size ** (
-        #    -0.5
-        # ) * min((step + 1) ** (-0.5), (step + 1) * 4000 ** (-1.5))
-        # autoencoder_scheduler = optim.lr_scheduler.LambdaLR(
-        #    autoencoder_optimizer, lr_lambda=[lambda1]
-        # )
-        # return {
-        #    "optimizer": autoencoder_optimizer,
-        #    "lr_scheduler": {
-        #        "scheduler": autoencoder_scheduler,
-        #        "interval": "step",
-        #        "frequency": 1,
-        #    },
-        # }
 
 
 class PortugueseSentimentDataModule(pl.LightningDataModule):
