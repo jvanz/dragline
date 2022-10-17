@@ -121,6 +121,7 @@ class AutoEncoder(nn.Module):
         z = self.encoder(
             input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
         )
+
         latent = self.sigmoid(z.last_hidden_state)
         latent = torch.sum(latent, dim=1)
 
@@ -129,17 +130,20 @@ class AutoEncoder(nn.Module):
         x_hat = self.decoder(
             input_ids=batch["input_ids"], encoder_hidden_states=latent.unsqueeze(1)
         )
-        probabilities = F.log_softmax(x_hat.logits, dim=-1)
-        return latent, probabilities
+
+        return latent, F.log_softmax(x_hat.logits, dim=-1)
 
     def generate(self, batch, bos_token_id, pad_token_id, max_sequence_length):
         z = self.encoder(
             input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
         )
-        y = torch.zeros(batch["input_ids"].size(0), 1).fill_(bos_token_id).long()
 
+        latent = self.sigmoid(z.last_hidden_state)
+        latent = torch.sum(latent, dim=1)
+
+        y = torch.zeros(batch["input_ids"].size(0), 1).fill_(bos_token_id).long()
         for i in range(max_sequence_length - 1):
-            x_hat = self.decoder(input_ids=y, encoder_hidden_states=z.last_hidden_state)
+            x_hat = self.decoder(input_ids=y, encoder_hidden_states=latent.unsqueeze(1))
             probabilities = F.log_softmax(x_hat.logits, dim=-1)[:, -1, :]
             _, next_word = torch.max(probabilities, dim=-1)
             y = torch.cat([y, next_word.unsqueeze(1)], dim=1)
@@ -166,7 +170,7 @@ class WangModel(pl.LightningModule):
             smoothing=0.1,
         )
 
-    def forward_pass(self, batch):
+    def _get_reconstruction_loss(self, batch):
         z, probabilities = self.autoencoder.forward(batch)
 
         probabilities = probabilities.contiguous().view(-1, probabilities.size(-1))
@@ -178,7 +182,7 @@ class WangModel(pl.LightningModule):
         return reconstruction_loss
 
     def training_step(self, batch, batch_idx):
-        reconstruction_loss = self.forward_pass(batch)
+        reconstruction_loss = self._get_reconstruction_loss(batch)
         self.log(
             RECONSTRUCTION_LOSS_NAME,
             reconstruction_loss,
@@ -190,7 +194,7 @@ class WangModel(pl.LightningModule):
         return reconstruction_loss
 
     def validation_step(self, batch, batch_idx):
-        reconstruction_loss = self.forward_pass(batch)
+        reconstruction_loss = self._get_reconstruction_loss(batch)
         self.log(
             VALIDATION_RECONSTRUCTION_LOSS_NAME,
             reconstruction_loss,
@@ -202,7 +206,7 @@ class WangModel(pl.LightningModule):
         return reconstruction_loss
 
     def test_step(self, batch, batch_idx):
-        reconstruction_loss = self.forward_pass(batch)
+        reconstruction_loss = self._get_reconstruction_loss(batch)
         self.log(
             TEST_RECONSTRUCTION_LOSS_NAME,
             reconstruction_loss,
@@ -217,9 +221,16 @@ class WangModel(pl.LightningModule):
         autoencoder_optimizer = torch.optim.Adam(
             self.autoencoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9
         )
-        # Eu nao retorno um lr_scheduler pq estou fazendo finetunning e nao preciso
-        # grandes alterações nos pesos
-        return autoencoder_optimizer
+        # Using a scheduler is optional but can be helpful.
+        # The scheduler reduces the LR if the validation performance hasn't improved for the last N epochs
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            autoencoder_optimizer, mode="min", factor=0.2, patience=20, min_lr=5e-5
+        )
+        return {
+            "optimizer": autoencoder_optimizer,
+            "lr_scheduler": scheduler,
+            "monitor": VALIDATION_RECONSTRUCTION_LOSS_NAME,
+        }
 
 
 class PortugueseSentimentDataModule(pl.LightningDataModule):
@@ -276,6 +287,46 @@ class PortugueseSentimentDataModule(pl.LightningDataModule):
         )
 
 
+# Callback utilizado para ver o resultado da reconstrução do autoencoder
+class ReconstructionCallback(pl.Callback):
+    def __init__(self, input_texts, tokenizer, max_sequence_length):
+        super().__init__()
+        self.input_texts = input_texts
+        self.tokenizer = tokenizer
+        self.max_sequence_length = max_sequence_length
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        with torch.no_grad():
+            pl_module.eval()
+
+            batch = self.tokenizer(
+                self.input_texts,
+                add_special_tokens=False,
+                padding="max_length",
+                truncation=True,
+                max_length=self.max_sequence_length,
+            )
+            batch["input_ids"] = torch.Tensor(batch["input_ids"]).long()
+            batch["token_type_ids"] = torch.Tensor(batch["token_type_ids"]).long()
+            batch["attention_mask"] = torch.Tensor(batch["attention_mask"]).long()
+
+            outputs = pl_module.autoencoder.generate(
+                batch,
+                bos_token_id=tokenizer.cls_token_id,
+                pad_token_id=tokenizer.pad_token_id,
+                max_sequence_length=self.max_sequence_length,
+            )
+
+            output = tokenizer.decode(outputs[0])
+            trainer.logger.experiment.log_text(
+                trainer.logger.run_id,
+                text=output,
+                artifact_file="reconstruction_text.txt",
+            )
+
+        pl_module.train()
+
+
 def main(args):
     model = WangModel(BERT_CHECKPOINT, batch_size=BATCH_SIZE)
 
@@ -283,18 +334,37 @@ def main(args):
     trainer = pl.trainer.trainer.Trainer.from_argparse_args(
         args,
         callbacks=[
-            EarlyStopping(monitor=RECONSTRUCTION_LOSS_NAME, patience=5),
+            EarlyStopping(monitor=RECONSTRUCTION_LOSS_NAME, patience=10),
+            EarlyStopping(monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME, patience=5),
+            ReconstructionCallback(
+                ["Quero ver se o meu modelo está funcionando"],
+                tokenizer,
+                MAX_SEQUENCE_LENGTH,
+            ),
             ModelCheckpoint(
                 dirpath=CHECKPOINT_DIR,
-                filename=f"{{epoch}}-{{step}}-{{{RECONSTRUCTION_LOSS_NAME}:.6f}}",
-                save_top_k=3,
+                filename=f"{{epoch}}-{{step}}-{RECONSTRUCTION_LOSS_NAME}-{{{RECONSTRUCTION_LOSS_NAME}:.6f}}",
+                save_top_k=5,
                 monitor=RECONSTRUCTION_LOSS_NAME,
                 save_last=True,
+                mode="min",
                 auto_insert_metric_name=True,
                 save_weights_only=False,
                 every_n_train_steps=5000,
+                save_on_train_epoch_end=True,
             ),
-            LearningRateMonitor(logging_interval="step"),
+            ModelCheckpoint(
+                dirpath=CHECKPOINT_DIR,
+                filename=f"{{epoch}}-{{step}}-{VALIDATION_RECONSTRUCTION_LOSS_NAME}-{{{VALIDATION_RECONSTRUCTION_LOSS_NAME}:.6f}}",
+                save_top_k=5,
+                monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME,
+                save_last=True,
+                mode="min",
+                auto_insert_metric_name=True,
+                save_weights_only=False,
+                save_on_train_epoch_end=True,
+            ),
+            LearningRateMonitor(log_momentum=True),
             ModelSummary(max_depth=3),
         ],
         logger=mlf_logger,

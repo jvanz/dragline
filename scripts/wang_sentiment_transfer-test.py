@@ -65,10 +65,6 @@ class AutoEncoder(nn.Module):
             input_ids=batch["input_ids"], encoder_hidden_states=latent.unsqueeze(1)
         )
 
-        # x_hat = self.decoder(
-        #     input_ids=batch["input_ids"], encoder_hidden_states=z.last_hidden_state
-        # )
-
         return latent, x_hat.logits, F.log_softmax(x_hat.logits, dim=-1)
 
     def generate(self, batch, bos_token_id, pad_token_id, max_sequence_length):
@@ -81,7 +77,6 @@ class AutoEncoder(nn.Module):
 
         y = torch.zeros(batch["input_ids"].size(0), 1).fill_(bos_token_id).long()
         for i in range(max_sequence_length - 1):
-            # x_hat = self.decoder(input_ids=y, encoder_hidden_states=z.last_hidden_state)
             x_hat = self.decoder(input_ids=y, encoder_hidden_states=latent.unsqueeze(1))
             probabilities = F.log_softmax(x_hat.logits, dim=-1)[:, -1, :]
             _, next_word = torch.max(probabilities, dim=-1)
