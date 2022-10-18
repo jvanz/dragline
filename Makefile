@@ -204,8 +204,7 @@ sentiment_text_style_transfer: format
 .PHONY: wang_sentiment_transfer
 wang_sentiment_transfer: format
 	 python scripts/wang_sentiment_transfer.py \
-	--accelerator auto \
-	--deterministic
+	--accelerator auto 
      
  .PHONY: wang_sentiment_transfer_test
 wang_sentiment_transfer_test: format

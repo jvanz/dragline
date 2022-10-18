@@ -160,8 +160,8 @@ class WangModel(pl.LightningModule):
     def __init__(
         self,
         checkpoint,
-        batch_size=32,
-        learning_rate=1e-3,
+        batch_size=48,
+        learning_rate=1e-2,
     ):
         super().__init__()
         assert checkpoint != None and len(checkpoint) > 0
@@ -257,11 +257,11 @@ class PortugueseSentimentDataModule(pl.LightningDataModule):
         self.dataset = load_dataset("jvanz/portuguese_sentiment_analysis")
         self.dataset = self.dataset.rename_column("polarity", "label")
 
-        self.dataset["train"] = self.dataset["train"].select(range(self.batch_size * 3))
-        self.dataset["validation"] = self.dataset["validation"].select(
-            range(self.batch_size * 3)
-        )
-        self.dataset["test"] = self.dataset["test"].select(range(self.batch_size * 3))
+        # self.dataset["train"] = self.dataset["train"].select(range(self.batch_size * 3))
+        # self.dataset["validation"] = self.dataset["validation"].select(
+        #     range(self.batch_size * 3)
+        # )
+        # self.dataset["test"] = self.dataset["test"].select(range(self.batch_size * 3))
 
         self.dataset = self.dataset.map(
             lambda x: tokenizer(
