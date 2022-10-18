@@ -11,6 +11,10 @@ import torch
 from torch import optim, nn, Tensor
 import torch.nn.functional as F
 from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning.utilities.model_summary import summarize
+from pytorch_lightning.utilities.model_summary.model_summary import (
+    _format_summary_table,
+)
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer  # Or BertTokenizer
 from transformers import (
@@ -26,6 +30,8 @@ from transformers import (
 from transformers import AutoModel  # or BertModel, for BERT without pretraining heads
 from datasets import load_dataset
 import mlflow.pytorch
+import mlflow
+from pathlib import Path
 
 
 BERT_CHECKPOINT = "neuralmind/bert-base-portuguese-cased"
@@ -219,7 +225,10 @@ class WangModel(pl.LightningModule):
 
     def configure_optimizers(self):
         autoencoder_optimizer = torch.optim.Adam(
-            self.autoencoder.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9
+            self.autoencoder.parameters(),
+            lr=self.learning_rate,
+            betas=(0.9, 0.98),
+            eps=1e-9,
         )
         # Using a scheduler is optional but can be helpful.
         # The scheduler reduces the LR if the validation performance hasn't improved for the last N epochs
@@ -247,6 +256,12 @@ class PortugueseSentimentDataModule(pl.LightningDataModule):
 
         self.dataset = load_dataset("jvanz/portuguese_sentiment_analysis")
         self.dataset = self.dataset.rename_column("polarity", "label")
+
+        self.dataset["train"] = self.dataset["train"].select(range(self.batch_size * 3))
+        self.dataset["validation"] = self.dataset["validation"].select(
+            range(self.batch_size * 3)
+        )
+        self.dataset["test"] = self.dataset["test"].select(range(self.batch_size * 3))
 
         self.dataset = self.dataset.map(
             lambda x: tokenizer(
@@ -321,65 +336,121 @@ class ReconstructionCallback(pl.Callback):
             trainer.logger.experiment.log_text(
                 trainer.logger.run_id,
                 text=output,
-                artifact_file="reconstruction_text.txt",
+                artifact_file=f"reconstruction_text/epoch_{trainer.current_epoch}.txt",
             )
 
         pl_module.train()
 
 
-def main(args):
-    model = WangModel(BERT_CHECKPOINT, batch_size=BATCH_SIZE)
+# Log the model structure in mlflow
+class MlFlowModelSummary(pl.Callback):
+    def __init__(self, max_depth: int = 10) -> None:
+        self._max_depth: int = max_depth
 
-    mlf_logger = MLFlowLogger(experiment_name=EXPERIMENT_NAME)
-    trainer = pl.trainer.trainer.Trainer.from_argparse_args(
-        args,
-        callbacks=[
-            EarlyStopping(monitor=RECONSTRUCTION_LOSS_NAME, patience=10),
-            EarlyStopping(monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME, patience=5),
-            ReconstructionCallback(
-                ["Quero ver se o meu modelo está funcionando"],
-                tokenizer,
-                MAX_SEQUENCE_LENGTH,
-            ),
-            ModelCheckpoint(
-                dirpath=CHECKPOINT_DIR,
-                filename=f"{{epoch}}-{{step}}-{RECONSTRUCTION_LOSS_NAME}-{{{RECONSTRUCTION_LOSS_NAME}:.6f}}",
-                save_top_k=5,
-                monitor=RECONSTRUCTION_LOSS_NAME,
-                save_last=True,
-                mode="min",
-                auto_insert_metric_name=True,
-                save_weights_only=False,
-                every_n_train_steps=5000,
-                save_on_train_epoch_end=True,
-            ),
-            ModelCheckpoint(
-                dirpath=CHECKPOINT_DIR,
-                filename=f"{{epoch}}-{{step}}-{VALIDATION_RECONSTRUCTION_LOSS_NAME}-{{{VALIDATION_RECONSTRUCTION_LOSS_NAME}:.6f}}",
-                save_top_k=5,
-                monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME,
-                save_last=True,
-                mode="min",
-                auto_insert_metric_name=True,
-                save_weights_only=False,
-                save_on_train_epoch_end=True,
-            ),
-            LearningRateMonitor(log_momentum=True),
-            ModelSummary(max_depth=3),
-        ],
-        logger=mlf_logger,
-    )
+    def on_fit_start(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        if not self._max_depth:
+            return None
 
-    datamodule = PortugueseSentimentDataModule(BERT_CHECKPOINT, batch_size=BATCH_SIZE)
+        model_summary = summarize(pl_module, max_depth=self._max_depth)
+        summary_data = model_summary._get_summary_data()
+        total_parameters = model_summary.total_parameters
+        trainable_parameters = model_summary.trainable_parameters
+        model_size = model_summary.model_size
 
-    mlflow.pytorch.autolog()
-
-    print(f"Resuming from: {args.checkpoint_path}")
-    trainer.fit(model, datamodule=datamodule, ckpt_path=args.checkpoint_path)
-    trainer.test(datamodule=datamodule, ckpt_path="best")
+        if trainer.is_global_zero:
+            summary_table = _format_summary_table(
+                total_parameters, trainable_parameters, model_size, *summary_data
+            )
+            trainer.logger.experiment.log_text(
+                trainer.logger.run_id,
+                text=summary_table,
+                artifact_file=f"model_summary.txt",
+            )
 
 
-if __name__ == "__main__":
+def train_wang(args):
+    # create the mlflow experiment if necessary
+    if mlflow.get_experiment_by_name(EXPERIMENT_NAME) is None:
+        mlflow.create_experiment(
+            EXPERIMENT_NAME, artifact_location=Path.cwd().joinpath("mlruns").as_uri()
+        )
+
+    experiment = mlflow.get_experiment_by_name(EXPERIMENT_NAME)
+    print("Experiment_id: {}".format(experiment.experiment_id))
+    print("Artifact Location: {}".format(experiment.artifact_location))
+    print("Tags: {}".format(experiment.tags))
+    print("Lifecycle_stage: {}".format(experiment.lifecycle_stage))
+    print("Creation timestamp: {}".format(experiment.creation_time))
+
+    with mlflow.start_run(
+        experiment_id=experiment.experiment_id, tags=vars(args)
+    ) as run:
+        model = WangModel(BERT_CHECKPOINT, batch_size=BATCH_SIZE)
+        mlflow.pytorch.log_model(model, "model")
+
+        mlf_logger = MLFlowLogger(
+            experiment_name=EXPERIMENT_NAME, run_id=run.info.run_id
+        )
+        train_batches_checkpoint_callback = ModelCheckpoint(
+            dirpath=CHECKPOINT_DIR,
+            filename=f"{run.info.run_id}-{{epoch}}-{{step}}-{{{RECONSTRUCTION_LOSS_NAME}:.6f}}",
+            save_top_k=5,
+            monitor=RECONSTRUCTION_LOSS_NAME,
+            save_last=True,
+            mode="min",
+            auto_insert_metric_name=True,
+            save_weights_only=False,
+            every_n_train_steps=5000,
+            save_on_train_epoch_end=True,
+        )
+        train_batches_checkpoint_callback.CHECKPOINT_NAME_LAST = (
+            f"{run.info.run_id}-{{epoch}}-{{step}}-last"
+        )
+        val_epoch_checkpoint_callback = ModelCheckpoint(
+            dirpath=CHECKPOINT_DIR,
+            filename=f"{run.info.run_id}-{{epoch}}-{{{VALIDATION_RECONSTRUCTION_LOSS_NAME}:.6f}}",
+            save_top_k=5,
+            monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME,
+            save_last=True,
+            mode="min",
+            auto_insert_metric_name=True,
+            save_weights_only=False,
+            save_on_train_epoch_end=True,
+        )
+        val_epoch_checkpoint_callback.CHECKPOINT_NAME_LAST = (
+            f"{run.info.run_id}-{{epoch}}-last"
+        )
+        trainer = pl.trainer.trainer.Trainer.from_argparse_args(
+            args,
+            callbacks=[
+                EarlyStopping(monitor=RECONSTRUCTION_LOSS_NAME, patience=10),
+                EarlyStopping(monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME, patience=5),
+                train_batches_checkpoint_callback,
+                val_epoch_checkpoint_callback,
+                MlFlowModelSummary(),
+                ReconstructionCallback(
+                    ["Quero ver se o meu modelo está funcionando"],
+                    tokenizer,
+                    MAX_SEQUENCE_LENGTH,
+                ),
+                LearningRateMonitor(log_momentum=True),
+                ModelSummary(max_depth=3),
+            ],
+            logger=mlf_logger,
+        )
+
+        datamodule = PortugueseSentimentDataModule(
+            BERT_CHECKPOINT, batch_size=BATCH_SIZE
+        )
+
+        print(f"Resuming from: {args.checkpoint_path}")
+        trainer.fit(model, datamodule=datamodule, ckpt_path=args.checkpoint_path)
+        trainer.test(datamodule=datamodule, ckpt_path="best")
+
+
+def main():
     parser = ArgumentParser()
     parser.add_argument(
         "--checkpoint_path",
@@ -390,4 +461,8 @@ if __name__ == "__main__":
     parser = pl.trainer.trainer.Trainer.add_argparse_args(parser)
     args = parser.parse_args()
 
-    main(args)
+    train_wang(args)
+
+
+if __name__ == "__main__":
+    main()
