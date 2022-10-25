@@ -147,7 +147,12 @@ class AutoEncoder(nn.Module):
         latent = self.sigmoid(z.last_hidden_state)
         latent = torch.sum(latent, dim=1)
 
-        y = torch.zeros(batch["input_ids"].size(0), 1).fill_(bos_token_id).long()
+        y = (
+            torch.zeros(batch["input_ids"].size(0), 1)
+            .fill_(bos_token_id)
+            .long()
+            .to(self.decoder.device)
+        )
         for i in range(max_sequence_length - 1):
             x_hat = self.decoder(input_ids=y, encoder_hidden_states=latent.unsqueeze(1))
             probabilities = F.log_softmax(x_hat.logits, dim=-1)[:, -1, :]
@@ -233,7 +238,7 @@ class WangModel(pl.LightningModule):
         # Using a scheduler is optional but can be helpful.
         # The scheduler reduces the LR if the validation performance hasn't improved for the last N epochs
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            autoencoder_optimizer, mode="min", factor=0.2, patience=20, min_lr=5e-5
+            autoencoder_optimizer, mode="min", factor=0.2, patience=2, min_lr=5e-5
         )
         return {
             "optimizer": autoencoder_optimizer,
@@ -321,9 +326,15 @@ class ReconstructionCallback(pl.Callback):
                 truncation=True,
                 max_length=self.max_sequence_length,
             )
-            batch["input_ids"] = torch.Tensor(batch["input_ids"]).long()
-            batch["token_type_ids"] = torch.Tensor(batch["token_type_ids"]).long()
-            batch["attention_mask"] = torch.Tensor(batch["attention_mask"]).long()
+            batch["input_ids"] = (
+                torch.Tensor(batch["input_ids"]).long().to(pl_module.device)
+            )
+            batch["token_type_ids"] = (
+                torch.Tensor(batch["token_type_ids"]).long().to(pl_module.device)
+            )
+            batch["attention_mask"] = (
+                torch.Tensor(batch["attention_mask"]).long().to(pl_module.device)
+            )
 
             outputs = pl_module.autoencoder.generate(
                 batch,
@@ -382,7 +393,6 @@ def train_wang(args):
     print("Artifact Location: {}".format(experiment.artifact_location))
     print("Tags: {}".format(experiment.tags))
     print("Lifecycle_stage: {}".format(experiment.lifecycle_stage))
-    print("Creation timestamp: {}".format(experiment.creation_time))
 
     with mlflow.start_run(
         experiment_id=experiment.experiment_id, tags=vars(args)
@@ -410,7 +420,7 @@ def train_wang(args):
         )
         val_epoch_checkpoint_callback = ModelCheckpoint(
             dirpath=CHECKPOINT_DIR,
-            filename=f"{run.info.run_id}-{{epoch}}-{{{VALIDATION_RECONSTRUCTION_LOSS_NAME}:.6f}}",
+            filename=f"{run.info.run_id}-{{epoch}}-{{step}}-{{{VALIDATION_RECONSTRUCTION_LOSS_NAME}:.6f}}-{{{RECONSTRUCTION_LOSS_NAME}:.6f}}",
             save_top_k=5,
             monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME,
             save_last=True,
@@ -420,14 +430,14 @@ def train_wang(args):
             save_on_train_epoch_end=True,
         )
         val_epoch_checkpoint_callback.CHECKPOINT_NAME_LAST = (
-            f"{run.info.run_id}-{{epoch}}-last"
+            f"{run.info.run_id}-{{epoch}}-{{step}}-last"
         )
         trainer = pl.trainer.trainer.Trainer.from_argparse_args(
             args,
             callbacks=[
-                EarlyStopping(monitor=RECONSTRUCTION_LOSS_NAME, patience=10),
+                # EarlyStopping(monitor=RECONSTRUCTION_LOSS_NAME, patience=10),
                 EarlyStopping(monitor=VALIDATION_RECONSTRUCTION_LOSS_NAME, patience=5),
-                train_batches_checkpoint_callback,
+                # train_batches_checkpoint_callback,
                 val_epoch_checkpoint_callback,
                 MlFlowModelSummary(),
                 ReconstructionCallback(
@@ -447,7 +457,7 @@ def train_wang(args):
 
         print(f"Resuming from: {args.checkpoint_path}")
         trainer.fit(model, datamodule=datamodule, ckpt_path=args.checkpoint_path)
-        trainer.test(datamodule=datamodule, ckpt_path="best")
+        # trainer.test(datamodule=datamodule, ckpt_path="best")
 
 
 def main():

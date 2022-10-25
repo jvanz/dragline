@@ -205,6 +205,7 @@ sentiment_text_style_transfer: format
 wang_sentiment_transfer: format
 	 python scripts/wang_sentiment_transfer.py \
 	--accelerator auto 
+	#--checkpoint_path ./checkpoints/wang_controllable_2019/32e65da4e1d944fe9392ce7aa1135110-epoch=18-step=1060000-last.ckpt
      
  .PHONY: wang_sentiment_transfer_test
 wang_sentiment_transfer_test: format
